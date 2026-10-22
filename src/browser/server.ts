@@ -1,26 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DisplayNameTaken, openCoOpword, type CoOpword, type PlayerSession } from "../product/coopword.ts";
+import { deliverMagicLink } from "../mail/magicLink.ts";
+import { DisplayNameTaken, openCoOpword, type PlayerSession } from "../product/coopword.ts";
+import { readSnapshot, writeSnapshot } from "../storage/fileSnapshot.ts";
 
 const port = Number(process.env.PORT ?? 3000);
 const statePath = join(dirname(fileURLToPath(import.meta.url)), "../../data/coopword.json");
 
-function load(): CoOpword {
-  try {
-    return openCoOpword(readFileSync(statePath, "utf8"));
-  } catch {
-    return openCoOpword();
-  }
-}
-
-let coOpword = load();
-
-function save(): void {
-  mkdirSync(dirname(statePath), { recursive: true });
-  writeFileSync(statePath, coOpword.snapshot());
-}
+const saved = readSnapshot(statePath);
+let coOpword = saved === undefined ? openCoOpword() : openCoOpword(saved);
 
 function escapeHtml(value: string): string {
   return value
@@ -40,31 +29,22 @@ function readCookie(request: IncomingMessage, name: string): string | undefined 
   return undefined;
 }
 
-function sessionFrom(request: IncomingMessage): PlayerSession | undefined {
-  const token = readCookie(request, "player");
-  return token ? { token } : undefined;
-}
-
 async function readBody(request: IncomingMessage): Promise<URLSearchParams> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(chunk as Buffer);
   return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
 }
 
-function page(body: string): string {
-  return `<!doctype html>
+function send(response: ServerResponse, status: number, html: string, headers: Record<string, string> = {}): void {
+  response.writeHead(status, { "content-type": "text/html; charset=utf-8", ...headers });
+  response.end(`<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
 <title>Co-opword</title>
 <body>
-${body}
+${html}
 </body>
-</html>`;
-}
-
-function send(response: ServerResponse, status: number, html: string, headers: Record<string, string> = {}): void {
-  response.writeHead(status, { "content-type": "text/html; charset=utf-8", ...headers });
-  response.end(page(html));
+</html>`);
 }
 
 function signedIn(session: PlayerSession): string | undefined {
@@ -91,8 +71,8 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
   if (request.method === "GET" && url.pathname === "/") {
-    const session = sessionFrom(request);
-    const home = session ? signedIn(session) : undefined;
+    const token = readCookie(request, "player");
+    const home = token ? signedIn({ token }) : undefined;
     if (home) {
       send(response, 200, home);
       return;
@@ -112,12 +92,12 @@ const server = createServer(async (request, response) => {
     const body = await readBody(request);
     const email = body.get("email") ?? "";
     const link = coOpword.requestMagicLink(email);
-    save();
-    const href = `/magic?token=${encodeURIComponent(link.token)}`;
+    writeSnapshot(statePath, coOpword.snapshot());
+    const mail = deliverMagicLink(email, link.token);
     send(
       response,
       200,
-      `<p>A magic link for ${escapeHtml(email)} is ready.</p><p><a href="${href}">Open magic link</a></p>`,
+      `<p>A magic link for ${escapeHtml(mail.email)} is ready.</p><p><a href="${escapeHtml(mail.openPath)}">Open magic link</a></p>`,
     );
     return;
   }
@@ -125,7 +105,7 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/magic") {
     try {
       const session = coOpword.openMagicLink(url.searchParams.get("token") ?? "");
-      save();
+      writeSnapshot(statePath, coOpword.snapshot());
       send(response, 303, `<p>Signed in.</p>`, {
         location: "/",
         "set-cookie": `player=${encodeURIComponent(session.token)}; HttpOnly; Path=/; SameSite=Lax`,
@@ -137,15 +117,15 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/display-name") {
-    const session = sessionFrom(request);
-    if (!session) {
+    const token = readCookie(request, "player");
+    if (!token) {
       send(response, 303, `<p>Sign in.</p>`, { location: "/" });
       return;
     }
     const body = await readBody(request);
     try {
-      coOpword.chooseDisplayName(session, body.get("displayName") ?? "");
-      save();
+      coOpword.chooseDisplayName({ token }, body.get("displayName") ?? "");
+      writeSnapshot(statePath, coOpword.snapshot());
       send(response, 303, `<p>Saved.</p>`, { location: "/" });
     } catch (error) {
       if (error instanceof DisplayNameTaken) {
