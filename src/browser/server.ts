@@ -1,15 +1,20 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deliverMagicLink } from "../mail/magicLink.ts";
+import { createMailbox } from "../mail/magicLink.ts";
 import { DisplayNameTaken, openCoOpword, type PlayerSession } from "../product/coopword.ts";
 import { readSnapshot, writeSnapshot } from "../storage/fileSnapshot.ts";
 
 const port = Number(process.env.PORT ?? 3000);
 const statePath = join(dirname(fileURLToPath(import.meta.url)), "../../data/coopword.json");
 
-const saved = readSnapshot(statePath);
-let coOpword = saved === undefined ? openCoOpword() : openCoOpword(saved);
+const snapshot = readSnapshot(statePath);
+let coOpword = snapshot === undefined ? openCoOpword() : openCoOpword(snapshot);
+const mailbox = createMailbox();
+
+function saveSnapshot(): void {
+  writeSnapshot(statePath, coOpword.snapshot());
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -92,12 +97,18 @@ const server = createServer(async (request, response) => {
     const body = await readBody(request);
     const email = body.get("email") ?? "";
     const link = coOpword.requestMagicLink(email);
-    writeSnapshot(statePath, coOpword.snapshot());
-    const mail = deliverMagicLink(email, link.token);
+    saveSnapshot();
+    const openPath = `/magic?token=${encodeURIComponent(link.token)}`;
+    mailbox.sendMagicLink(email, openPath);
+    const delivered = mailbox.messagesFor(email).at(-1);
+    if (!delivered) {
+      send(response, 500, `<p>The magic link could not be sent.</p>`);
+      return;
+    }
     send(
       response,
       200,
-      `<p>A magic link for ${escapeHtml(mail.email)} is ready.</p><p><a href="${escapeHtml(mail.openPath)}">Open magic link</a></p>`,
+      `<p>A magic link for ${escapeHtml(delivered.email)} is ready.</p><p><a href="${escapeHtml(delivered.link)}">Open magic link</a></p>`,
     );
     return;
   }
@@ -105,7 +116,7 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/magic") {
     try {
       const session = coOpword.openMagicLink(url.searchParams.get("token") ?? "");
-      writeSnapshot(statePath, coOpword.snapshot());
+      saveSnapshot();
       send(response, 303, `<p>Signed in.</p>`, {
         location: "/",
         "set-cookie": `player=${encodeURIComponent(session.token)}; HttpOnly; Path=/; SameSite=Lax`,
@@ -125,7 +136,7 @@ const server = createServer(async (request, response) => {
     const body = await readBody(request);
     try {
       coOpword.chooseDisplayName({ token }, body.get("displayName") ?? "");
-      writeSnapshot(statePath, coOpword.snapshot());
+      saveSnapshot();
       send(response, 303, `<p>Saved.</p>`, { location: "/" });
     } catch (error) {
       if (error instanceof DisplayNameTaken) {

@@ -1,11 +1,21 @@
-export type MagicLinkMail = {
+export type MagicLinkMessage = {
   email: string;
-  openPath: string;
+  link: string;
 };
 
-export function deliverMagicLink(email: string, token: string): MagicLinkMail {
+export type Mailbox = {
+  sendMagicLink(email: string, link: string): void;
+  messagesFor(email: string): MagicLinkMessage[];
+};
+
+export function createMailbox(): Mailbox {
+  const messages: MagicLinkMessage[] = [];
   return {
-    email,
-    openPath: `/magic?token=${encodeURIComponent(token)}`,
+    sendMagicLink(email: string, link: string): void {
+      messages.push({ email, link });
+    },
+    messagesFor(email: string): MagicLinkMessage[] {
+      return messages.filter((message) => message.email === email);
+    },
   };
 }
