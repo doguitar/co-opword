@@ -1,21 +1,14 @@
-export type MagicLinkMessage = {
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
+export type DeliveredMagicLink = {
   email: string;
-  link: string;
+  token: string;
 };
 
-export type Mailbox = {
-  sendMagicLink(email: string, link: string): void;
-  messagesFor(email: string): MagicLinkMessage[];
-};
-
-export function createMailbox(): Mailbox {
-  const messages: MagicLinkMessage[] = [];
-  return {
-    sendMagicLink(email: string, link: string): void {
-      messages.push({ email, link });
-    },
-    messagesFor(email: string): MagicLinkMessage[] {
-      return messages.filter((message) => message.email === email);
-    },
-  };
+export function deliverMagicLink(outboxPath: string, email: string, token: string): DeliveredMagicLink {
+  const delivered = { email: email.trim().toLowerCase(), token };
+  mkdirSync(dirname(outboxPath), { recursive: true });
+  appendFileSync(outboxPath, `${JSON.stringify(delivered)}\n`);
+  return delivered;
 }
