@@ -42,11 +42,18 @@ type Player = {
   displayName: string | null;
 };
 
+type PublishedCrossword = {
+  crossword: OpenedLibraryCrossword;
+  author: string;
+  withdrawToken: string;
+};
+
 type State = {
   players: Player[];
   magicLinks: { token: string; email: string }[];
   sessions: { token: string; playerId: string }[];
   library: OpenedLibraryCrossword[];
+  published: PublishedCrossword[];
 };
 
 export type CoOpword = {
@@ -58,6 +65,10 @@ export type CoOpword = {
   admitLibraryCrossword(crossword: LibraryCrosswordInput): void;
   library(session: PlayerSession): { title: string }[];
   openLibraryCrossword(session: PlayerSession, title: string): OpenedLibraryCrossword;
+  publishCrossword(session: PlayerSession, crossword: LibraryCrosswordInput, author: string): { withdrawToken: string; email: string };
+  published(session: PlayerSession): { title: string; author: string }[];
+  openPublishedCrossword(session: PlayerSession, title: string, author: string): OpenedLibraryCrossword & { author: string };
+  withdrawCrossword(token: string): void;
   snapshot(): string;
 };
 
@@ -76,6 +87,7 @@ export function openCoOpword(snapshot?: string): CoOpword {
     magicLinks: parsed.magicLinks ?? [],
     sessions: parsed.sessions ?? [],
     library: parsed.library ?? [],
+    published: parsed.published ?? [],
   };
 
   function playerFor(session: PlayerSession): Player {
@@ -160,6 +172,35 @@ export function openCoOpword(snapshot?: string): CoOpword {
         throw new Error("That Crossword is not in the library");
       }
       return found;
+    },
+
+    publishCrossword(session: PlayerSession, crossword: LibraryCrosswordInput, author: string): { withdrawToken: string; email: string } {
+      const player = playerFor(session);
+      const admitted = checkedLibraryCrossword(crossword);
+      if (state.published.some((item) => item.crossword.title === admitted.title && item.author === author)) {
+        throw new CrosswordRejected();
+      }
+      const withdrawToken = crypto.randomUUID();
+      state.published.push({ crossword: admitted, author, withdrawToken });
+      return { withdrawToken, email: player.email };
+    },
+
+    published(session: PlayerSession): { title: string; author: string }[] {
+      playerFor(session);
+      return state.published.map((item) => ({ title: item.crossword.title, author: item.author }));
+    },
+
+    openPublishedCrossword(session: PlayerSession, title: string, author: string): OpenedLibraryCrossword & { author: string } {
+      playerFor(session);
+      const found = state.published.find((item) => item.crossword.title === title && item.author === author);
+      if (!found) throw new Error("That Crossword is not published");
+      return { ...found.crossword, author: found.author };
+    },
+
+    withdrawCrossword(token: string): void {
+      const index = state.published.findIndex((item) => item.withdrawToken === token);
+      if (index === -1) throw new CrosswordRejected();
+      state.published.splice(index, 1);
     },
   };
 }

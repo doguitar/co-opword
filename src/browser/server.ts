@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deliverMagicLink } from "../mail/magicLink.ts";
+import { deliverLink } from "../mail/magicLink.ts";
 import { CrosswordRejected, DisplayNameTaken, openCoOpword, type PlayerSession } from "../product/coopword.ts";
 import { librarySeed } from "./librarySeed.ts";
 import { readSnapshot, writeSnapshot } from "../storage/fileSnapshot.ts";
@@ -10,6 +10,7 @@ const port = Number(process.env.PORT ?? 3000);
 const dataDir = join(dirname(fileURLToPath(import.meta.url)), "../../data");
 const statePath = join(dataDir, "coopword.json");
 const outboxPath = join(dataDir, "magic-link-outbox.jsonl");
+const withdrawOutboxPath = join(dataDir, "withdraw-outbox.jsonl");
 
 const snapshot = readSnapshot(statePath);
 let coOpword = snapshot === undefined ? openCoOpword() : openCoOpword(snapshot);
@@ -74,7 +75,9 @@ function signedIn(session: PlayerSession): string | undefined {
 </form>
 <h2>Other players</h2>
 	<ul>${others}</ul>
-	<p><a href="/library">Library</a></p>`;
+		<p><a href="/library">Library</a></p>
+		<p><a href="/publish">Publish</a></p>
+		<p><a href="/published">Published</a></p>`;
   } catch {
     return undefined;
   }
@@ -106,7 +109,7 @@ const server = createServer(async (request, response) => {
     const email = body.get("email") ?? "";
     const issued = coOpword.requestMagicLink(email);
     writeSnapshot(statePath, coOpword.snapshot());
-    deliverMagicLink(outboxPath, issued.email, issued.token);
+    deliverLink(outboxPath, issued.email, issued.token);
     const href = `/magic?token=${encodeURIComponent(issued.token)}`;
     send(
       response,
@@ -187,6 +190,97 @@ const server = createServer(async (request, response) => {
       );
     } catch {
       send(response, 404, `<p>That Crossword is not in the library.</p>`);
+    }
+    return;
+  }
+
+
+  if (request.method === "GET" && url.pathname === "/publish") {
+    const token = readCookie(request, "player");
+    if (!token || !signedIn({ token })) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    const me = coOpword.whoAmI({ token });
+    const author = me.displayName ?? "";
+    send(
+      response,
+      200,
+      `<h1>Publish</h1>
+<form method="post" action="/publish">
+  <label>Author <input name="author" value="${escapeHtml(author)}"></label>
+  <label>Crossword JSON <textarea name="crossword" required></textarea></label>
+  <button type="submit">Publish</button>
+</form>`,
+    );
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/publish") {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    const body = await readBody(request);
+    try {
+      const crossword = JSON.parse(body.get("crossword") ?? "");
+      const issued = coOpword.publishCrossword({ token }, crossword, body.get("author") ?? "");
+      writeSnapshot(statePath, coOpword.snapshot());
+      deliverLink(withdrawOutboxPath, issued.email, issued.withdrawToken);
+      const href = `/withdraw?token=${encodeURIComponent(issued.withdrawToken)}`;
+      send(response, 200, `<p>A Withdraw link was sent to ${escapeHtml(issued.email)}.</p><p><a href="${href}">Withdraw</a></p>`);
+    } catch {
+      send(response, 400, `<p>That Crossword cannot be published.</p>`);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/withdraw") {
+    try {
+      coOpword.withdrawCrossword(url.searchParams.get("token") ?? "");
+      writeSnapshot(statePath, coOpword.snapshot());
+      send(response, 200, `<p>That Crossword is off the public list.</p>`);
+    } catch {
+      send(response, 400, `<p>That Withdraw link can only take a Crossword off the public list.</p>`);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/published") {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    const items = coOpword
+      .published({ token })
+      .map((crossword) => {
+        const href = `/published-crossword?title=${encodeURIComponent(crossword.title)}&author=${encodeURIComponent(crossword.author)}`;
+        const author = crossword.author === "" ? "no Author" : escapeHtml(crossword.author);
+        return `<li><a href="${href}">${escapeHtml(crossword.title)}</a> — ${author}</li>`;
+      })
+      .join("");
+    send(response, 200, `<h1>Published</h1><ul>${items}</ul>`);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/published-crossword") {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    try {
+      const opened = coOpword.openPublishedCrossword(
+        { token },
+        url.searchParams.get("title") ?? "",
+        url.searchParams.get("author") ?? "",
+      );
+      const author = opened.author === "" ? "no Author" : escapeHtml(opened.author);
+      send(response, 200, `<h1>${escapeHtml(opened.title)}</h1><p>${author}</p><p>${opened.words.length} Words</p>`);
+    } catch {
+      send(response, 404, `<p>That Crossword is not published.</p>`);
     }
     return;
   }

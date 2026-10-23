@@ -258,3 +258,62 @@ test("no two library Crosswords share a title, and the library is still there af
   const reopened = openCoOpword(coOpword.snapshot());
   assert.equal(reopened.openLibraryCrossword(session, "Tiny").words[0].clue, "Nine As");
 });
+
+const tinyCrossword = {
+  title: "Tiny",
+  kind: "freestyle" as const,
+  size: 9,
+  squares: Array.from({ length: 81 }, (_, index) => (Math.floor(index / 9) === 0 ? "A" : "#")),
+  words: [{ direction: "across" as const, row: 0, column: 0, answer: "AAAAAAAAA", clue: "Nine As" }],
+};
+
+test("a Player publishes a finished Crossword, and the Withdraw link only takes it off the public list", () => {
+  const coOpword = openCoOpword();
+  const ada = signedIn(coOpword, "Ada@Example.com", "Ada");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+
+  const issued = coOpword.publishCrossword(ada, tinyCrossword, "");
+  assert.equal(issued.email, "ada@example.com");
+  assert.deepEqual(coOpword.published(ada), [{ title: "Tiny", author: "" }]);
+
+  const opened = coOpword.openPublishedCrossword(ada, "Tiny", "");
+  assert.equal(opened.author, "");
+  assert.equal(opened.words[0].clue, "Nine As");
+  assert.equal("withdrawToken" in opened, false);
+  assert.equal(coOpword.openLibraryCrossword(ada, "Tiny").title, "Tiny");
+
+  const kept = openCoOpword(coOpword.snapshot());
+  assert.deepEqual(kept.published(ada), [{ title: "Tiny", author: "" }]);
+
+  kept.withdrawCrossword(issued.withdrawToken);
+  assert.deepEqual(kept.published(ada), []);
+  assert.equal(kept.openLibraryCrossword(ada, "Tiny").title, "Tiny");
+  assert.throws(() => kept.withdrawCrossword(issued.withdrawToken), CrosswordRejected);
+});
+
+test("the Author is whatever was published, a blank Author counts, and a later rename does not change it", () => {
+  const coOpword = openCoOpword();
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+
+  coOpword.publishCrossword(ada, tinyCrossword, "Ada");
+  coOpword.chooseDisplayName(ada, "Beatrice");
+  assert.equal(coOpword.openPublishedCrossword(ada, "Tiny", "Ada").author, "Ada");
+
+  assert.throws(() => coOpword.publishCrossword(ada, tinyCrossword, "Ada"), CrosswordRejected);
+  coOpword.publishCrossword(ada, { ...tinyCrossword, title: "Other" }, "");
+  coOpword.publishCrossword(ada, tinyCrossword, "");
+  assert.deepEqual(coOpword.published(ada), [
+    { title: "Tiny", author: "Ada" },
+    { title: "Other", author: "" },
+    { title: "Tiny", author: "" },
+  ]);
+
+  const stray = {
+    ...tinyCrossword,
+    title: "Stray",
+    squares: Array.from({ length: 81 }, (_, index) => (index < 3 ? "A" : "#")),
+    words: [{ direction: "across" as const, row: 0, column: 0, answer: "AA", clue: "Pair" }],
+  };
+  assert.throws(() => coOpword.publishCrossword(ada, stray, "Ada"), CrosswordRejected);
+  assert.equal(coOpword.published(ada).some((crossword) => crossword.title === "Stray"), false);
+});
