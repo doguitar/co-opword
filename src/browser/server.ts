@@ -2,7 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deliverMagicLink } from "../mail/magicLink.ts";
-import { DisplayNameTaken, openCoOpword, type PlayerSession } from "../product/coopword.ts";
+import { CrosswordRejected, DisplayNameTaken, openCoOpword, type PlayerSession } from "../product/coopword.ts";
+import { librarySeed } from "./librarySeed.ts";
 import { readSnapshot, writeSnapshot } from "../storage/fileSnapshot.ts";
 
 const port = Number(process.env.PORT ?? 3000);
@@ -12,6 +13,15 @@ const outboxPath = join(dataDir, "magic-link-outbox.jsonl");
 
 const snapshot = readSnapshot(statePath);
 let coOpword = snapshot === undefined ? openCoOpword() : openCoOpword(snapshot);
+
+for (const crossword of librarySeed) {
+  try {
+    coOpword.admitLibraryCrossword(crossword);
+  } catch (error) {
+    if (!(error instanceof CrosswordRejected)) throw error;
+  }
+}
+writeSnapshot(statePath, coOpword.snapshot());
 
 function escapeHtml(value: string): string {
   return value
@@ -63,7 +73,8 @@ function signedIn(session: PlayerSession): string | undefined {
   <button type="submit">${me.displayName === null ? "Choose" : "Rename"}</button>
 </form>
 <h2>Other players</h2>
-<ul>${others}</ul>`;
+	<ul>${others}</ul>
+	<p><a href="/library">Library</a></p>`;
   } catch {
     return undefined;
   }
@@ -136,6 +147,46 @@ const server = createServer(async (request, response) => {
         return;
       }
       send(response, 400, `<p>Sign in again.</p>`);
+    }
+    return;
+  }
+
+
+  if (request.method === "GET" && (url.pathname === "/library" || url.pathname === "/crossword")) {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    const session = { token };
+    try {
+      if (url.pathname === "/library") {
+        const items = coOpword
+          .library(session)
+          .map((crossword) => `<li><a href="/crossword?title=${encodeURIComponent(crossword.title)}">${escapeHtml(crossword.title)}</a></li>`)
+          .join("");
+        send(response, 200, `<h1>Library</h1><ul>${items}</ul><p><a href="/">Home</a></p>`);
+        return;
+      }
+      const opened = coOpword.openLibraryCrossword(session, url.searchParams.get("title") ?? "");
+      const rows = [];
+      for (let row = 0; row < opened.size; row++) {
+        const cells = opened.squares
+          .slice(row * opened.size, (row + 1) * opened.size)
+          .map((square) => `<td>${square === "#" ? "" : escapeHtml(square)}</td>`)
+          .join("");
+        rows.push(`<tr>${cells}</tr>`);
+      }
+      const clues = opened.words
+        .map((word) => `<li>${word.direction} ${word.length}: ${escapeHtml(word.clue)}</li>`)
+        .join("");
+      send(
+        response,
+        200,
+        `<h1>${escapeHtml(opened.title)}</h1><table>${rows.join("")}</table><ul>${clues}</ul><p><a href="/library">Library</a></p>`,
+      );
+    } catch {
+      send(response, 404, `<p>That Crossword is not in the library.</p>`);
     }
     return;
   }

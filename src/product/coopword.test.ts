@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DisplayNameTaken, openCoOpword } from "./coopword.ts";
+import { CrosswordRejected, DisplayNameTaken, openCoOpword } from "./coopword.ts";
 
 test("a magic link to a new email creates a Player and signs them in, and a later link to that email signs the same Player in", () => {
   const coOpword = openCoOpword();
@@ -60,4 +60,201 @@ test("closing the browser and opening it again returns the same Player", () => {
 
   const again = reopened.openMagicLink(reopened.requestMagicLink("ada@example.com").token);
   assert.deepEqual(reopened.whoAmI(again), { displayName: "Ada" });
+});
+
+function signedIn(coOpword: ReturnType<typeof openCoOpword>, email: string, displayName: string) {
+  const session = coOpword.openMagicLink(coOpword.requestMagicLink(email).token);
+  coOpword.chooseDisplayName(session, displayName);
+  return session;
+}
+
+test("a signed-in Player opens a library Crossword and sees its title, letters, Words, and clues, and no Author", () => {
+  const coOpword = openCoOpword();
+  const session = signedIn(coOpword, "ada@example.com", "Ada");
+
+  coOpword.admitLibraryCrossword({
+    title: "Tiny",
+    kind: "freestyle",
+    size: 9,
+    squares: Array.from({ length: 81 }, (_, index) => (Math.floor(index / 9) === 0 ? "A" : "#")),
+    words: [{ direction: "across", row: 0, column: 0, answer: "AAAAAAAAA", clue: "Nine As" }],
+  });
+
+  assert.deepEqual(
+    coOpword.library(session).map((crossword) => crossword.title),
+    ["Tiny"],
+  );
+
+  const opened = coOpword.openLibraryCrossword(session, "Tiny");
+  assert.equal(opened.title, "Tiny");
+  assert.equal(opened.kind, "freestyle");
+  assert.equal(opened.size, 9);
+  assert.equal(opened.squares[0], "A");
+  assert.equal(opened.squares[9], "#");
+  assert.deepEqual(opened.words, [
+    { direction: "across", row: 0, column: 0, length: 9, clue: "Nine As" },
+  ]);
+  assert.equal("author" in opened, false);
+});
+
+function letters(size: number, letter = "A"): string[] {
+  return Array.from({ length: size * size }, () => letter);
+}
+
+function bothWays(size: number) {
+  const words = [];
+  for (let index = 0; index < size; index++) {
+    const answer = "A".repeat(size);
+    words.push({ direction: "across" as const, row: index, column: 0, answer, clue: `Across ${index}` });
+    words.push({ direction: "down" as const, row: 0, column: index, answer, clue: `Down ${index}` });
+  }
+  return words;
+}
+
+test("a Standard library Crossword is 15 by 15 or 21 by 21, symmetric, and every letter sits in both an Across Word and a Down Word", () => {
+  const coOpword = openCoOpword();
+  const session = signedIn(coOpword, "ada@example.com", "Ada");
+
+  coOpword.admitLibraryCrossword({
+    title: "Block",
+    kind: "standard",
+    size: 15,
+    squares: letters(15),
+    words: bothWays(15),
+  });
+  assert.equal(coOpword.openLibraryCrossword(session, "Block").kind, "standard");
+
+  const acrossOnly = bothWays(15).filter((word) => word.direction === "across");
+  assert.throws(
+    () =>
+      coOpword.admitLibraryCrossword({
+        title: "Unchecked",
+        kind: "standard",
+        size: 15,
+        squares: letters(15),
+        words: acrossOnly,
+      }),
+    CrosswordRejected,
+  );
+
+  const asymmetric = letters(15);
+  asymmetric[0] = "#";
+  const lopsidedWords = [
+    { direction: "across" as const, row: 0, column: 1, answer: "A".repeat(14), clue: "Top" },
+    { direction: "down" as const, row: 1, column: 0, answer: "A".repeat(14), clue: "Left" },
+  ];
+  for (let index = 1; index < 15; index++) {
+    lopsidedWords.push({ direction: "across", row: index, column: 0, answer: "A".repeat(15), clue: `Across ${index}` });
+    lopsidedWords.push({ direction: "down", row: 0, column: index, answer: "A".repeat(15), clue: `Down ${index}` });
+  }
+  assert.throws(
+    () =>
+      coOpword.admitLibraryCrossword({
+        title: "Lopsided",
+        kind: "standard",
+        size: 15,
+        squares: asymmetric,
+        words: lopsidedWords,
+      }),
+    CrosswordRejected,
+  );
+
+  assert.throws(
+    () =>
+      coOpword.admitLibraryCrossword({
+        title: "Small",
+        kind: "standard",
+        size: 9,
+        squares: letters(9),
+        words: bothWays(9),
+      }),
+    CrosswordRejected,
+  );
+  assert.deepEqual(
+    coOpword.library(session).map((crossword) => crossword.title),
+    ["Block"],
+  );
+});
+
+test("Freestyle allows 9 through 21, including 15, without the half-turn rule, and a letter may sit in only one Word", () => {
+  const coOpword = openCoOpword();
+  const session = signedIn(coOpword, "ada@example.com", "Ada");
+  const squares = letters(15);
+  squares[0] = "#";
+  const words = [];
+  for (let row = 0; row < 15; row++) {
+    const start = row === 0 ? 1 : 0;
+    words.push({
+      direction: "across" as const,
+      row,
+      column: start,
+      answer: "A".repeat(15 - start),
+      clue: `Row ${row}`,
+    });
+  }
+
+  coOpword.admitLibraryCrossword({ title: "Loose", kind: "freestyle", size: 15, squares, words });
+  assert.equal(coOpword.openLibraryCrossword(session, "Loose").size, 15);
+
+  assert.throws(
+    () =>
+      coOpword.admitLibraryCrossword({
+        title: "Too small",
+        kind: "freestyle",
+        size: 8,
+        squares: letters(8),
+        words: [{ direction: "across", row: 0, column: 0, answer: "A".repeat(8), clue: "No" }],
+      }),
+    CrosswordRejected,
+  );
+});
+
+test("a white Square in no Word, or a Word shorter than two Squares, is not a library Crossword", () => {
+  const coOpword = openCoOpword();
+  signedIn(coOpword, "ada@example.com", "Ada");
+  const squares = Array.from({ length: 81 }, () => "#");
+  squares[0] = "A";
+  squares[1] = "A";
+  squares[2] = "B";
+
+  assert.throws(
+    () =>
+      coOpword.admitLibraryCrossword({
+        title: "Stray",
+        kind: "freestyle",
+        size: 9,
+        squares,
+        words: [{ direction: "across", row: 0, column: 0, answer: "AA", clue: "Pair" }],
+      }),
+    CrosswordRejected,
+  );
+  assert.throws(
+    () =>
+      coOpword.admitLibraryCrossword({
+        title: "One",
+        kind: "freestyle",
+        size: 9,
+        squares: Array.from({ length: 81 }, (_, index) => (index === 0 ? "A" : "#")),
+        words: [{ direction: "across", row: 0, column: 0, answer: "A", clue: "Single" }],
+      }),
+    CrosswordRejected,
+  );
+  assert.deepEqual(coOpword.library(signedIn(coOpword, "bea@example.com", "Bea")), []);
+});
+
+test("no two library Crosswords share a title, and the library is still there after the browser closes", () => {
+  const coOpword = openCoOpword();
+  const session = signedIn(coOpword, "ada@example.com", "Ada");
+  const crossword = {
+    title: "Tiny",
+    kind: "freestyle" as const,
+    size: 9,
+    squares: Array.from({ length: 81 }, (_, index) => (Math.floor(index / 9) === 0 ? "A" : "#")),
+    words: [{ direction: "across" as const, row: 0, column: 0, answer: "AAAAAAAAA", clue: "Nine As" }],
+  };
+  coOpword.admitLibraryCrossword(crossword);
+  assert.throws(() => coOpword.admitLibraryCrossword(crossword), CrosswordRejected);
+
+  const reopened = openCoOpword(coOpword.snapshot());
+  assert.equal(reopened.openLibraryCrossword(session, "Tiny").words[0].clue, "Nine As");
 });

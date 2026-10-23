@@ -11,6 +11,31 @@ export class DisplayNameTaken extends Error {
   }
 }
 
+export class CrosswordRejected extends Error {
+  constructor() {
+    super("That Crossword cannot go in the library");
+    this.name = "CrosswordRejected";
+  }
+}
+
+export type Direction = "across" | "down";
+
+export type LibraryCrosswordInput = {
+  title: string;
+  kind: "standard" | "freestyle";
+  size: number;
+  squares: string[];
+  words: { direction: Direction; row: number; column: number; answer: string; clue: string }[];
+};
+
+export type OpenedLibraryCrossword = {
+  title: string;
+  kind: "standard" | "freestyle";
+  size: number;
+  squares: string[];
+  words: { direction: Direction; row: number; column: number; length: number; clue: string }[];
+};
+
 type Player = {
   id: string;
   email: string;
@@ -21,6 +46,7 @@ type State = {
   players: Player[];
   magicLinks: { token: string; email: string }[];
   sessions: { token: string; playerId: string }[];
+  library: OpenedLibraryCrossword[];
 };
 
 export type CoOpword = {
@@ -29,6 +55,9 @@ export type CoOpword = {
   chooseDisplayName(session: PlayerSession, displayName: string): void;
   whoAmI(session: PlayerSession): SignedInPlayer;
   playersOthersSee(session: PlayerSession): { displayName: string }[];
+  admitLibraryCrossword(crossword: LibraryCrosswordInput): void;
+  library(session: PlayerSession): { title: string }[];
+  openLibraryCrossword(session: PlayerSession, title: string): OpenedLibraryCrossword;
   snapshot(): string;
 };
 
@@ -41,9 +70,13 @@ function nameKey(displayName: string): string {
 }
 
 export function openCoOpword(snapshot?: string): CoOpword {
-  const state: State = snapshot
-    ? (JSON.parse(snapshot) as State)
-    : { players: [], magicLinks: [], sessions: [] };
+  const parsed: Partial<State> = snapshot ? (JSON.parse(snapshot) as Partial<State>) : {};
+  const state: State = {
+    players: parsed.players ?? [],
+    magicLinks: parsed.magicLinks ?? [],
+    sessions: parsed.sessions ?? [],
+    library: parsed.library ?? [],
+  };
 
   function playerFor(session: PlayerSession): Player {
     const found = state.sessions.find((entry) => entry.token === session.token);
@@ -107,5 +140,80 @@ export function openCoOpword(snapshot?: string): CoOpword {
     snapshot(): string {
       return JSON.stringify(state);
     },
+    admitLibraryCrossword(crossword: LibraryCrosswordInput): void {
+      const admitted = checkedLibraryCrossword(crossword);
+      if (state.library.some((existing) => existing.title === admitted.title)) {
+        throw new CrosswordRejected();
+      }
+      state.library.push(admitted);
+    },
+
+    library(session: PlayerSession): { title: string }[] {
+      playerFor(session);
+      return state.library.map((crossword) => ({ title: crossword.title }));
+    },
+
+    openLibraryCrossword(session: PlayerSession, title: string): OpenedLibraryCrossword {
+      playerFor(session);
+      const found = state.library.find((crossword) => crossword.title === title);
+      if (!found) {
+        throw new Error("That Crossword is not in the library");
+      }
+      return found;
+    },
   };
+}
+
+function checkedLibraryCrossword(crossword: LibraryCrosswordInput): OpenedLibraryCrossword {
+  const { title, kind, size, squares, words } = crossword;
+  if (title.trim() === "") throw new CrosswordRejected();
+  if (!Number.isInteger(size)) throw new CrosswordRejected();
+  if (kind === "standard") {
+    if (size !== 15 && size !== 21) throw new CrosswordRejected();
+  } else if (kind === "freestyle") {
+    if (size < 9 || size > 21) throw new CrosswordRejected();
+  } else {
+    throw new CrosswordRejected();
+  }
+  if (squares.length !== size * size) throw new CrosswordRejected();
+
+  const covered = squares.map(() => ({ across: false, down: false }));
+  const storedWords = words.map((word) => {
+    if (word.answer.length < 2 || word.clue.trim() === "") throw new CrosswordRejected();
+    for (let offset = 0; offset < word.answer.length; offset++) {
+      const row = word.row + (word.direction === "down" ? offset : 0);
+      const column = word.column + (word.direction === "across" ? offset : 0);
+      if (row < 0 || column < 0 || row >= size || column >= size) throw new CrosswordRejected();
+      const index = row * size + column;
+      if (squares[index] !== word.answer[offset]) throw new CrosswordRejected();
+      covered[index][word.direction] = true;
+    }
+    return {
+      direction: word.direction,
+      row: word.row,
+      column: word.column,
+      length: word.answer.length,
+      clue: word.clue,
+    };
+  });
+
+  squares.forEach((square, index) => {
+    if (square === "#") return;
+    if (!/^[A-Za-z]$/.test(square)) throw new CrosswordRejected();
+    const cell = covered[index];
+    if (!cell.across && !cell.down) throw new CrosswordRejected();
+    if (kind === "standard" && (!cell.across || !cell.down)) throw new CrosswordRejected();
+  });
+
+  if (kind === "standard") {
+    for (let row = 0; row < size; row++) {
+      for (let column = 0; column < size; column++) {
+        const black = squares[row * size + column] === "#";
+        const opposite = squares[(size - 1 - row) * size + (size - 1 - column)] === "#";
+        if (black !== opposite) throw new CrosswordRejected();
+      }
+    }
+  }
+
+  return { title, kind, size, squares: squares.slice(), words: storedWords };
 }
