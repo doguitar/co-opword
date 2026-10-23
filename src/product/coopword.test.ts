@@ -6,6 +6,7 @@ test("a magic link to a new email creates a Player and signs them in, and a late
   const coOpword = openCoOpword();
 
   const firstLink = coOpword.requestMagicLink("Ada@Example.com");
+  assert.equal(firstLink.email, "ada@example.com");
   const firstSession = coOpword.openMagicLink(firstLink.token);
 
   assert.deepEqual(coOpword.whoAmI(firstSession), { displayName: null });

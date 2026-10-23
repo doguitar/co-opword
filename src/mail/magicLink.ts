@@ -7,7 +7,7 @@ export type DeliveredMagicLink = {
 };
 
 export function deliverMagicLink(outboxPath: string, email: string, token: string): DeliveredMagicLink {
-  const delivered = { email: email.trim().toLowerCase(), token };
+  const delivered = { email, token };
   mkdirSync(dirname(outboxPath), { recursive: true });
   appendFileSync(outboxPath, `${JSON.stringify(delivered)}\n`);
   return delivered;

@@ -95,12 +95,12 @@ const server = createServer(async (request, response) => {
     const email = body.get("email") ?? "";
     const issued = coOpword.requestMagicLink(email);
     writeSnapshot(statePath, coOpword.snapshot());
-    const delivered = deliverMagicLink(outboxPath, email, issued.token);
-    const href = `/magic?token=${encodeURIComponent(delivered.token)}`;
+    deliverMagicLink(outboxPath, issued.email, issued.token);
+    const href = `/magic?token=${encodeURIComponent(issued.token)}`;
     send(
       response,
       200,
-      `<p>A magic link was sent to ${escapeHtml(delivered.email)}.</p><p><a href="${href}">Open magic link</a></p>`,
+      `<p>A magic link was sent to ${escapeHtml(issued.email)}.</p><p><a href="${href}">Open magic link</a></p>`,
     );
     return;
   }

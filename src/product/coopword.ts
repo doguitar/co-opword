@@ -1,4 +1,4 @@
-export type MagicLink = { token: string };
+export type MagicLink = { token: string; email: string };
 
 export type PlayerSession = { token: string };
 
@@ -59,11 +59,11 @@ export function openCoOpword(snapshot?: string): CoOpword {
 
   return {
     requestMagicLink(email: string): MagicLink {
+      const normalized = normalizeEmail(email);
       const token = crypto.randomUUID();
-      state.magicLinks.push({ token, email: normalizeEmail(email) });
-      return { token };
+      state.magicLinks.push({ token, email: normalized });
+      return { token, email: normalized };
     },
-
     openMagicLink(token: string): PlayerSession {
       const linkIndex = state.magicLinks.findIndex((link) => link.token === token);
       if (linkIndex === -1) {
