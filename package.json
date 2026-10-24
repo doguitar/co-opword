@@ -3,12 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --experimental-strip-types --test src/product/coopword.test.ts src/browser/server.test.ts",
+    "test": "node --experimental-strip-types --test src/product/coopword.test.ts src/browser/server.test.ts src/storage/snapshotStore.test.ts",
     "typecheck": "tsc --noEmit",
     "start": "node --experimental-strip-types src/browser/server.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "mysql2": "^3.24.6",
+    "pg": "^8.23.1"
   }
 }

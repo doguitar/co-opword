@@ -4,20 +4,24 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deliverLink } from "../mail/magicLink.ts";
 import { CrosswordRejected, DisplayNameTaken, openCoOpword, type PlayerSession } from "../product/coopword.ts";
+import { openSnapshotStore } from "../storage/snapshotStore.ts";
 import { librarySeed } from "./librarySeed.ts";
-import { readSnapshot, writeSnapshot } from "../storage/fileSnapshot.ts";
 
 const port = Number(process.env.PORT ?? 3000);
 const here = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(here, "../../data");
 const pagesDir = join(here, "pages");
-const statePath = join(dataDir, "coopword.json");
 const outboxPath = join(dataDir, "magic-link-outbox.jsonl");
 const withdrawOutboxPath = join(dataDir, "withdraw-outbox.jsonl");
 const stylesheet = readFileSync(join(pagesDir, "co-opword.css"));
 
-const snapshot = readSnapshot(statePath);
+const store = await openSnapshotStore(process.env.DATABASE_URL, dataDir);
+const snapshot = await store.read();
 let coOpword = snapshot === undefined ? openCoOpword() : openCoOpword(snapshot);
+
+async function save(): Promise<void> {
+  await store.write(coOpword.snapshot());
+}
 
 for (const crossword of librarySeed) {
   try {
@@ -26,7 +30,7 @@ for (const crossword of librarySeed) {
     if (!(error instanceof CrosswordRejected)) throw error;
   }
 }
-writeSnapshot(statePath, coOpword.snapshot());
+await save();
 
 function escapeHtml(value: string): string {
   return value
@@ -150,7 +154,7 @@ const server = createServer(async (request, response) => {
     const body = await readBody(request);
     const email = body.get("email") ?? "";
     const issued = coOpword.requestMagicLink(email);
-    writeSnapshot(statePath, coOpword.snapshot());
+    await save();
     deliverLink(outboxPath, issued.email, issued.token);
     const href = `/magic?token=${encodeURIComponent(issued.token)}`;
     send(response, 200, messageLink(`A magic link was sent to ${issued.email}.`, href, "Open magic link"));
@@ -160,7 +164,7 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/magic") {
     try {
       const session = coOpword.openMagicLink(url.searchParams.get("token") ?? "");
-      writeSnapshot(statePath, coOpword.snapshot());
+      await save();
       send(response, 303, message("Signed in."), {
         location: session.invite === null ? "/" : `/session?invite=${encodeURIComponent(session.invite)}`,
         "set-cookie": `player=${encodeURIComponent(session.token)}; HttpOnly; Path=/; SameSite=Lax`,
@@ -180,7 +184,7 @@ const server = createServer(async (request, response) => {
     const body = await readBody(request);
     try {
       coOpword.chooseDisplayName({ token }, body.get("displayName") ?? "");
-      writeSnapshot(statePath, coOpword.snapshot());
+      await save();
       send(response, 303, message("Saved."), { location: "/" });
     } catch (error) {
       if (error instanceof DisplayNameTaken) {
@@ -245,7 +249,7 @@ const server = createServer(async (request, response) => {
     try {
       const crossword = JSON.parse(body.get("crossword") ?? "");
       const issued = coOpword.publishCrossword({ token }, crossword, body.get("author") ?? "");
-      writeSnapshot(statePath, coOpword.snapshot());
+      await save();
       deliverLink(withdrawOutboxPath, issued.email, issued.withdrawToken);
       const href = `/withdraw?token=${encodeURIComponent(issued.withdrawToken)}`;
       send(response, 200, messageLink(`A Withdraw link was sent to ${issued.email}.`, href, "Withdraw"));
@@ -258,7 +262,7 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/withdraw") {
     try {
       coOpword.withdrawCrossword(url.searchParams.get("token") ?? "");
-      writeSnapshot(statePath, coOpword.snapshot());
+      await save();
       send(response, 200, message("That Crossword is off the public list."));
     } catch {
       send(response, 400, message("That Withdraw link can only take a Crossword off the public list."));
@@ -317,7 +321,7 @@ const server = createServer(async (request, response) => {
     try {
       const author = body.get("author");
       const started = author === null ? coOpword.startSession({ token }, body.get("title") ?? "") : coOpword.startPublishedSession({ token }, body.get("title") ?? "", author);
-      writeSnapshot(statePath, coOpword.snapshot());
+      await save();
       send(response, 303, message("Session"), { location: `/session?invite=${encodeURIComponent(started.invite)}` });
     } catch {
       send(response, 404, message("That Crossword is not in the library."));
@@ -334,7 +338,7 @@ const server = createServer(async (request, response) => {
     const invite = url.searchParams.get("invite") ?? "";
     try {
       coOpword.joinSession({ token }, invite);
-      writeSnapshot(statePath, coOpword.snapshot());
+      await save();
       send(response, 303, message("Session"), { location: `/session?invite=${encodeURIComponent(invite)}` });
     } catch {
       send(response, 404, message("That Invite is no longer valid."));
@@ -390,7 +394,7 @@ const server = createServer(async (request, response) => {
       else if (url.pathname === "/session/clear") coOpword.clearSquare({ token }, invite, index);
       else if (url.pathname === "/session/close") coOpword.closeSession({ token }, invite);
       else coOpword.typeLetter({ token }, invite, body.get("letter") ?? "");
-      writeSnapshot(statePath, coOpword.snapshot());
+      await save();
       let next = url.pathname === "/session/close" ? "/" : sessionPath;
       if (url.pathname === "/session/letter") {
         try {
@@ -424,7 +428,7 @@ const server = createServer(async (request, response) => {
       } else {
         coOpword.offerFriendship({ token }, invite, body.get("displayName") ?? "");
       }
-      writeSnapshot(statePath, coOpword.snapshot());
+      await save();
       send(response, 303, message("Session"), { location: `/session?invite=${encodeURIComponent(invite)}` });
     } catch {
       send(response, 400, message("That did not change the Session."));
