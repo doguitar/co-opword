@@ -85,6 +85,7 @@ function signedIn(session: PlayerSession): string | undefined {
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+  coOpword.noteTime(Date.now());
 
   if (request.method === "GET" && url.pathname === "/") {
     const token = readCookie(request, "player");
@@ -278,7 +279,11 @@ const server = createServer(async (request, response) => {
         url.searchParams.get("author") ?? "",
       );
       const author = opened.author === "" ? "no Author" : escapeHtml(opened.author);
-      send(response, 200, `<h1>${escapeHtml(opened.title)}</h1><p>${author}</p><p>${opened.words.length} Words</p>`);
+      send(
+        response,
+        200,
+        `<h1>${escapeHtml(opened.title)}</h1><p>${author}</p><p>${opened.words.length} Words</p><form method="post" action="/session"><input type="hidden" name="title" value="${escapeHtml(opened.title)}"><input type="hidden" name="author" value="${escapeHtml(opened.author)}"><button type="submit">Start a Session</button></form>`,
+      );
     } catch {
       send(response, 404, `<p>That Crossword is not published.</p>`);
     }
@@ -293,7 +298,10 @@ const server = createServer(async (request, response) => {
     }
     const body = await readBody(request);
     try {
-      const started = coOpword.startSession({ token }, body.get("title") ?? "");
+      const author = body.get("author");
+      const started = author === null
+        ? coOpword.startSession({ token }, body.get("title") ?? "")
+        : coOpword.startPublishedSession({ token }, body.get("title") ?? "", author);
       writeSnapshot(statePath, coOpword.snapshot());
       send(response, 303, `<p>Session</p>`, { location: `/session?invite=${encodeURIComponent(started.invite)}` });
     } catch {
@@ -339,10 +347,14 @@ const server = createServer(async (request, response) => {
       }
       const clues = opened.words.map((word) => `<li>${word.direction} ${word.length}: ${escapeHtml(word.clue)}</li>`).join("");
       const link = `/join?invite=${encodeURIComponent(opened.invite)}`;
+      const alerts = coOpword
+        .sessionAlerts({ token }, invite)
+        .map((alert) => `<li>${escapeHtml(alert.displayName ?? "")} ${alert.kind}</li>`)
+        .join("");
       send(
         response,
         200,
-        `<style>table{width:100%;max-width:36rem;border-collapse:collapse}td{border:1px solid;height:2rem;text-align:center}</style><h1>${escapeHtml(opened.title)}</h1><p>Invite <code>${escapeHtml(opened.invite)}</code> <a href="${link}">${link}</a></p><table>${rows.join("")}</table><ul>${clues}</ul><form method="post" action="/session/letter"><input type="hidden" name="invite" value="${escapeHtml(opened.invite)}"><label>Square <input name="index" inputmode="numeric"></label><label>Letter <input name="letter" maxlength="1"></label><button type="submit" name="act" value="letter">Type</button><button type="submit" formaction="/session/select">Select</button><button type="submit" formaction="/session/clear">Clear</button><button type="submit" formaction="/session/close">Close</button></form>`,
+        `<style>table{width:100%;max-width:36rem;border-collapse:collapse}td{border:1px solid;height:2rem;text-align:center}</style><h1>${escapeHtml(opened.title)}</h1><p>Invite <code>${escapeHtml(opened.invite)}</code> <a href="${link}">${link}</a></p><table>${rows.join("")}</table><ul>${clues}</ul><form method="post" action="/session/letter"><input type="hidden" name="invite" value="${escapeHtml(opened.invite)}"><label>Square <input name="index" inputmode="numeric"></label><label>Letter <input name="letter" maxlength="1"></label><button type="submit" name="act" value="letter">Type</button><button type="submit" formaction="/session/select">Select</button><button type="submit" formaction="/session/clear">Clear</button><button type="submit" formaction="/session/close">Close</button></form><form method="post" action="/session/invite"><input type="hidden" name="invite" value="${escapeHtml(opened.invite)}"><label>Email <input name="email" type="email" required></label><button type="submit">Invite into this Session</button></form><form method="post" action="/session/offer"><input type="hidden" name="invite" value="${escapeHtml(opened.invite)}"><label>Player <input name="displayName"></label><button type="submit">Offer friendship</button><button type="submit" formaction="/session/decline">Decline</button></form><ul>${alerts}</ul><p><a href="/completions">Completions</a></p>`,
       );
     } catch {
       send(response, 404, `<p>That Invite is not yours.</p>`);
@@ -370,6 +382,49 @@ const server = createServer(async (request, response) => {
     } catch {
       send(response, 400, `<p>That Square did not take the letter.</p>`);
     }
+    return;
+  }
+
+  if (request.method === "POST" && (url.pathname === "/session/invite" || url.pathname === "/session/offer" || url.pathname === "/session/decline")) {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    const body = await readBody(request);
+    const invite = body.get("invite") ?? "";
+    try {
+      if (url.pathname === "/session/invite") {
+        const issued = coOpword.inviteEmail({ token }, invite, body.get("email") ?? "");
+        if (issued.token) deliverLink(outboxPath, issued.email, issued.token);
+      } else if (url.pathname === "/session/decline") {
+        coOpword.declineFriendship({ token }, invite, body.get("displayName") ?? "");
+      } else {
+        coOpword.offerFriendship({ token }, invite, body.get("displayName") ?? "");
+      }
+      writeSnapshot(statePath, coOpword.snapshot());
+      send(response, 303, `<p>Session</p>`, { location: `/session?invite=${encodeURIComponent(invite)}` });
+    } catch {
+      send(response, 400, `<p>That did not change the Session.</p>`);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/completions") {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    const items = coOpword
+      .completions({ token })
+      .map((completion) => {
+        const author = completion.author === null ? "no Author" : escapeHtml(completion.author);
+        const roster = completion.roster.map((entry) => `<li>${escapeHtml(entry.displayName ?? "")}: ${entry.letters}</li>`).join("");
+        return `<section><h2>${escapeHtml(completion.title)}</h2><p>${author}</p><p>${completion.duration}</p><ul>${roster}</ul></section>`;
+      })
+      .join("");
+    send(response, 200, `<h1>Completions</h1>${items}<p><a href="/">Home</a></p>`);
     return;
   }
 

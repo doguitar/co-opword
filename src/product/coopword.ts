@@ -51,22 +51,46 @@ type PublishedCrossword = {
 type LiveSession = {
   invite: string;
   crossword: OpenedLibraryCrossword;
+  author: string | null;
+  startedAt: number;
+  lastActivity: number;
   letters: (string | null)[];
   locked: boolean[];
+  writtenBy: (string | null)[];
   presence: { playerId: string; index: number }[];
   memberIds: string[];
+  memberClocks: { playerId: string; at: number }[];
+  offers: { fromId: string; toId: string; status: "pending" | "declined" }[];
 };
+
+type CompletionRecord = {
+  title: string;
+  author: string | null;
+  duration: number;
+  roster: { playerId: string; displayName: string | null; letters: number }[];
+};
+
+export type Completion = {
+  title: string;
+  author: string | null;
+  duration: number;
+  roster: { displayName: string | null; letters: number }[];
+};
+
+const WEEK = 7 * 24 * 60 * 60 * 1000;
 
 type OpenView = { playerId: string; invite: string };
 
 type State = {
   players: Player[];
-  magicLinks: { token: string; email: string }[];
+  magicLinks: { token: string; email: string; invite?: string }[];
   sessions: { token: string; playerId: string }[];
   library: OpenedLibraryCrossword[];
   published: PublishedCrossword[];
   liveSessions: LiveSession[];
   openViews: OpenView[];
+  completions: CompletionRecord[];
+  friends: { a: string; b: string }[];
 };
 
 export type OpenedSession = {
@@ -98,6 +122,14 @@ export type CoOpword = {
   typeLetter(session: PlayerSession, invite: string, letter: string): void;
   clearSquare(session: PlayerSession, invite: string, index: number): void;
   closeSession(session: PlayerSession, invite: string): void;
+  noteTime(now: number): void;
+  startPublishedSession(session: PlayerSession, title: string, author: string): { invite: string };
+  completions(session: PlayerSession): Completion[];
+  offerFriendship(session: PlayerSession, invite: string, displayName: string): void;
+  declineFriendship(session: PlayerSession, invite: string, displayName: string): void;
+  sessionAlerts(session: PlayerSession, invite: string): { displayName: string | null; kind: "pending" | "declined" }[];
+  friends(session: PlayerSession): { displayName: string | null }[];
+  inviteEmail(session: PlayerSession, invite: string, email: string): { email: string; token: string | null };
   snapshot(): string;
 };
 
@@ -119,7 +151,11 @@ export function openCoOpword(snapshot?: string): CoOpword {
     published: parsed.published ?? [],
     liveSessions: parsed.liveSessions ?? [],
     openViews: parsed.openViews ?? [],
+    completions: parsed.completions ?? [],
+    friends: parsed.friends ?? [],
   };
+
+  let now = 0;
 
   function playerFor(session: PlayerSession): Player {
     const found = state.sessions.find((entry) => entry.token === session.token);
@@ -153,7 +189,15 @@ export function openCoOpword(snapshot?: string): CoOpword {
       }
       const session = { token: crypto.randomUUID(), playerId: player.id };
       state.sessions.push(session);
+      if (link.invite) {
+        const live = state.liveSessions.find((entry) => entry.invite === link.invite);
+        if (live && !live.memberIds.includes(player.id)) addMember(live, player.id);
+      }
       return { token: session.token };
+    },
+    noteTime(value: number): void {
+      now = value;
+      sweep();
     },
 
     chooseDisplayName(session: PlayerSession, displayName: string): void {
@@ -236,22 +280,18 @@ export function openCoOpword(snapshot?: string): CoOpword {
     startSession(session: PlayerSession, title: string): { invite: string } {
       const player = playerFor(session);
       const crossword = structuredClone(this.openLibraryCrossword(session, title));
-      const invite = crypto.randomUUID();
-      state.liveSessions.push({
-        invite,
-        crossword,
-        letters: crossword.squares.map(() => null),
-        locked: crossword.squares.map(() => false),
-        presence: [],
-        memberIds: [player.id],
-      });
-      state.openViews.push({ playerId: player.id, invite });
-      return { invite };
+      return beginSession(player.id, crossword, null);
+    },
+    startPublishedSession(session: PlayerSession, title: string, author: string): { invite: string } {
+      const player = playerFor(session);
+      const opened = this.openPublishedCrossword(session, title, author);
+      const { author: publishedAuthor, ...crossword } = opened;
+      return beginSession(player.id, structuredClone(crossword), publishedAuthor);
     },
     joinSession(session: PlayerSession, invite: string): { invite: string } {
       const player = playerFor(session);
       const live = liveFor(invite);
-      if (!live.memberIds.includes(player.id)) live.memberIds.push(player.id);
+      if (!live.memberIds.includes(player.id)) addMember(live, player.id);
       return { invite: live.invite };
     },
     openSession(session: PlayerSession, invite: string): OpenedSession {
@@ -269,8 +309,11 @@ export function openCoOpword(snapshot?: string): CoOpword {
       requireMember(live, player.id);
       requireOpen(player.id, invite);
       requireWhite(live, index);
+      const previous = live.presence.find((entry) => entry.playerId === player.id);
+      if (previous?.index === index) return;
       live.presence = live.presence.filter((entry) => entry.playerId !== player.id);
       live.presence.push({ playerId: player.id, index });
+      touch(live, player.id);
     },
     typeLetter(session: PlayerSession, invite: string, letter: string): void {
       const player = playerFor(session);
@@ -283,6 +326,9 @@ export function openCoOpword(snapshot?: string): CoOpword {
       if (live.locked[selected.index]) throw new CrosswordRejected();
       live.letters[selected.index] = letter.toUpperCase();
       live.locked[selected.index] = true;
+      live.writtenBy[selected.index] = player.id;
+      touch(live, player.id);
+      if (gridMatches(live)) finish(live);
     },
     clearSquare(session: PlayerSession, invite: string, index: number): void {
       const player = playerFor(session);
@@ -291,6 +337,78 @@ export function openCoOpword(snapshot?: string): CoOpword {
       requireWhite(live, index);
       live.letters[index] = null;
       live.locked[index] = false;
+      live.writtenBy[index] = null;
+    },
+    completions(session: PlayerSession): Completion[] {
+      const player = playerFor(session);
+      return state.completions
+        .filter((completion) => completion.roster.some((entry) => entry.playerId === player.id))
+        .map((completion) => ({
+          title: completion.title,
+          author: completion.author,
+          duration: completion.duration,
+          roster: completion.roster.map((entry) => ({ displayName: entry.displayName, letters: entry.letters })),
+        }));
+    },
+    offerFriendship(session: PlayerSession, invite: string, displayName: string): void {
+      const player = playerFor(session);
+      const live = liveFor(invite);
+      requireMember(live, player.id);
+      const other = memberByName(live, displayName);
+      if (other.id === player.id) throw new Error("That Player is not in this Session");
+      const between = live.offers.filter((offer) => pair(offer.fromId, offer.toId, player.id, other.id));
+      const incoming = between.find((offer) => offer.status === "pending" && offer.toId === player.id);
+      if (incoming) {
+        live.offers = live.offers.filter((offer) => offer !== incoming);
+        rememberFriends(player.id, other.id);
+        return;
+      }
+      if (between.length > 0) throw new Error("That friendship was already offered");
+      live.offers.push({ fromId: player.id, toId: other.id, status: "pending" });
+    },
+    declineFriendship(session: PlayerSession, invite: string, displayName: string): void {
+      const player = playerFor(session);
+      const live = liveFor(invite);
+      requireMember(live, player.id);
+      const other = memberByName(live, displayName);
+      const pending = live.offers.find((offer) => offer.status === "pending" && offer.fromId === other.id && offer.toId === player.id);
+      if (!pending) throw new Error("There is no friendship offer");
+      pending.status = "declined";
+    },
+    sessionAlerts(session: PlayerSession, invite: string): { displayName: string | null; kind: "pending" | "declined" }[] {
+      const player = playerFor(session);
+      const live = liveFor(invite);
+      requireMember(live, player.id);
+      const nameOf = (playerId: string) => state.players.find((entry) => entry.id === playerId)?.displayName ?? null;
+      return live.offers
+        .filter((offer) => (offer.status === "pending" && offer.toId === player.id) || (offer.status === "declined" && offer.fromId === player.id))
+        .map((offer) => ({
+          displayName: nameOf(offer.status === "pending" ? offer.fromId : offer.toId),
+          kind: offer.status,
+        }));
+    },
+    friends(session: PlayerSession): { displayName: string | null }[] {
+      const player = playerFor(session);
+      return state.friends
+        .filter((pairIds) => pairIds.a === player.id || pairIds.b === player.id)
+        .map((pairIds) => {
+          const otherId = pairIds.a === player.id ? pairIds.b : pairIds.a;
+          return { displayName: state.players.find((entry) => entry.id === otherId)?.displayName ?? null };
+        });
+    },
+    inviteEmail(session: PlayerSession, invite: string, email: string): { email: string; token: string | null } {
+      const player = playerFor(session);
+      const live = liveFor(invite);
+      requireMember(live, player.id);
+      const normalized = normalizeEmail(email);
+      const existing = state.players.find((entry) => entry.email === normalized);
+      if (existing) {
+        if (!live.memberIds.includes(existing.id)) addMember(live, existing.id);
+        return { email: normalized, token: null };
+      }
+      const token = crypto.randomUUID();
+      state.magicLinks.push({ token, email: normalized, invite });
+      return { email: normalized, token };
     },
     closeSession(session: PlayerSession, invite: string): void {
       const player = playerFor(session);
@@ -300,6 +418,105 @@ export function openCoOpword(snapshot?: string): CoOpword {
       live.presence = live.presence.filter((entry) => entry.playerId !== player.id);
     },
   };
+
+  function beginSession(playerId: string, crossword: OpenedLibraryCrossword, author: string | null): { invite: string } {
+    const invite = crypto.randomUUID();
+    state.liveSessions.push({
+      invite,
+      crossword,
+      author,
+      startedAt: now,
+      lastActivity: now,
+      letters: crossword.squares.map(() => null),
+      locked: crossword.squares.map(() => false),
+      writtenBy: crossword.squares.map(() => null),
+      presence: [],
+      memberIds: [playerId],
+      memberClocks: [{ playerId, at: now }],
+      offers: [],
+    });
+    state.openViews.push({ playerId, invite });
+    return { invite };
+  }
+
+  function addMember(live: LiveSession, playerId: string): void {
+    live.memberIds.push(playerId);
+    live.memberClocks.push({ playerId, at: now });
+  }
+
+  function touch(live: LiveSession, playerId: string): void {
+    live.lastActivity = now;
+    const clock = live.memberClocks.find((entry) => entry.playerId === playerId);
+    if (clock) clock.at = now;
+  }
+
+  function gridMatches(live: LiveSession): boolean {
+    return live.crossword.squares.every((square, index) => square === "#" || live.letters[index] === square.toUpperCase());
+  }
+
+  function finish(live: LiveSession): void {
+    const counts = new Map<string, number>();
+    live.writtenBy.forEach((playerId, index) => {
+      if (!playerId || !live.locked[index]) return;
+      counts.set(playerId, (counts.get(playerId) ?? 0) + 1);
+    });
+    const roster = [...counts.entries()].map(([playerId, letters]) => ({
+      playerId,
+      displayName: state.players.find((player) => player.id === playerId)?.displayName ?? null,
+      letters,
+    }));
+    if (roster.length > 0) {
+      state.completions.push({
+        title: live.crossword.title,
+        author: live.author,
+        duration: now - live.startedAt,
+        roster,
+      });
+    }
+    endSession(live);
+  }
+
+  function endSession(live: LiveSession): void {
+    state.liveSessions = state.liveSessions.filter((entry) => entry !== live);
+    state.openViews = state.openViews.filter((view) => view.invite !== live.invite);
+  }
+
+  function removeMember(live: LiveSession, playerId: string): void {
+    live.memberIds = live.memberIds.filter((id) => id !== playerId);
+    live.memberClocks = live.memberClocks.filter((entry) => entry.playerId !== playerId);
+    live.presence = live.presence.filter((entry) => entry.playerId !== playerId);
+    state.openViews = state.openViews.filter((view) => view.playerId !== playerId || view.invite !== live.invite);
+    live.offers = live.offers.filter((offer) => offer.status === "declined" || (offer.fromId !== playerId && offer.toId !== playerId));
+  }
+
+  function sweep(): void {
+    for (const live of [...state.liveSessions]) {
+      if (now - live.lastActivity >= WEEK) {
+        endSession(live);
+        continue;
+      }
+      for (const clock of [...live.memberClocks]) {
+        if (now - clock.at >= WEEK) removeMember(live, clock.playerId);
+      }
+    }
+  }
+
+  function memberByName(live: LiveSession, displayName: string): Player {
+    const found = live.memberIds
+      .map((id) => state.players.find((player) => player.id === id))
+      .find((player) => player?.displayName === displayName);
+    if (!found) throw new Error("That Player is not in this Session");
+    return found;
+  }
+
+  function pair(fromId: string, toId: string, left: string, right: string): boolean {
+    return (fromId === left && toId === right) || (fromId === right && toId === left);
+  }
+
+  function rememberFriends(left: string, right: string): void {
+    const [a, b] = left < right ? [left, right] : [right, left];
+    if (!state.friends.some((entry) => entry.a === a && entry.b === b)) state.friends.push({ a, b });
+  }
 
   function isOpen(playerId: string, invite: string): boolean {
     return state.openViews.some((view) => view.playerId === playerId && view.invite === invite);

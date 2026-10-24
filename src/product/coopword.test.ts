@@ -387,3 +387,201 @@ test("a Player can be in two Sessions, and a letter lands only on the Square sel
   const kept = openCoOpword(coOpword.snapshot());
   assert.equal(kept.openSession(ada, first.invite).squares[0].letter, "B");
 });
+
+const WEEK = 7 * 24 * 60 * 60 * 1000;
+
+function fillSolved(coOpword: CoOpword, player: { token: string }, invite: string) {
+  for (let index = 0; index < 9; index++) {
+    coOpword.selectSquare(player, invite, index);
+    coOpword.typeLetter(player, invite, "A");
+  }
+}
+
+test("the Session ends only when the Grid matches, and only Players who left a Locked letter get that Completion", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  const sam = signedIn(coOpword, "sam@example.com", "Sam");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  const invite = coOpword.startSession(ada, "Tiny").invite;
+  coOpword.joinSession(sam, invite);
+  coOpword.openSession(sam, invite);
+
+  for (let index = 0; index < 8; index++) {
+    coOpword.selectSquare(ada, invite, index);
+    coOpword.typeLetter(ada, invite, "A");
+  }
+  coOpword.selectSquare(ada, invite, 8);
+  coOpword.typeLetter(ada, invite, "B");
+  assert.equal(coOpword.openSession(ada, invite).squares[8].letter, "B");
+  assert.equal(coOpword.completions(ada).length, 0);
+  assert.equal(coOpword.openSession(ada, invite).squares.some((square) => square.letter === "A" && square.block), false);
+
+  coOpword.clearSquare(ada, invite, 8);
+  coOpword.noteTime(5000);
+  coOpword.selectSquare(ada, invite, 8);
+  coOpword.typeLetter(ada, invite, "A");
+
+  assert.throws(() => coOpword.openSession(ada, invite));
+  const completion = coOpword.completions(ada)[0];
+  assert.equal(completion.title, "Tiny");
+  assert.equal(completion.author, null);
+  assert.equal(completion.duration, 5000);
+  assert.deepEqual(completion.roster, [{ displayName: "Ada", letters: 9 }]);
+  assert.equal(coOpword.completions(sam).length, 0);
+
+  coOpword.chooseDisplayName(ada, "Beatrice");
+  assert.equal(coOpword.completions(ada)[0].roster[0].displayName, "Ada");
+
+  const again = coOpword.startSession(ada, "Tiny").invite;
+  coOpword.noteTime(8000);
+  fillSolved(coOpword, ada, again);
+  assert.equal(coOpword.completions(ada).length, 2);
+  assert.equal(coOpword.completions(ada)[1].duration, 3000);
+});
+
+test("a Player leaves seven days after their last letter or Square selection, and an idle Session keeps nothing", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  const sam = signedIn(coOpword, "sam@example.com", "Sam");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  const invite = coOpword.startSession(ada, "Tiny").invite;
+  coOpword.joinSession(sam, invite);
+  coOpword.openSession(sam, invite);
+  coOpword.selectSquare(ada, invite, 0);
+  coOpword.typeLetter(ada, invite, "B");
+
+  coOpword.noteTime(6 * 24 * 60 * 60 * 1000);
+  coOpword.selectSquare(ada, invite, 0);
+  coOpword.selectSquare(sam, invite, 1);
+  coOpword.noteTime(WEEK);
+  assert.throws(() => coOpword.openSession(ada, invite));
+  assert.equal(coOpword.openSession(sam, invite).squares[0].letter, "B");
+  assert.equal(coOpword.openSession(sam, invite).players.some((player) => player.displayName === "Ada"), false);
+
+  coOpword.joinSession(ada, invite);
+  coOpword.noteTime(WEEK + 6 * 24 * 60 * 60 * 1000 - 1);
+  coOpword.selectSquare(sam, invite, 2);
+  coOpword.noteTime(WEEK + 6 * 24 * 60 * 60 * 1000);
+  assert.equal(coOpword.openSession(ada, invite).players.some((player) => player.displayName === "Ada"), true);
+
+  const idle = openCoOpword();
+  idle.noteTime(0);
+  const solo = signedIn(idle, "solo@example.com", "Solo");
+  idle.admitLibraryCrossword(tinyCrossword);
+  const abandoned = idle.startSession(solo, "Tiny").invite;
+  idle.selectSquare(solo, abandoned, 0);
+  idle.typeLetter(solo, abandoned, "B");
+  idle.noteTime(WEEK);
+  assert.throws(() => idle.openSession(solo, abandoned));
+  assert.equal(idle.completions(solo).length, 0);
+});
+
+test("friendship is offered inside one Session, and a decline is visible only to the offerer", () => {
+  const coOpword = openCoOpword();
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  const sam = signedIn(coOpword, "sam@example.com", "Sam");
+  const pat = signedIn(coOpword, "pat@example.com", "Pat");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  const invite = coOpword.startSession(ada, "Tiny").invite;
+  coOpword.joinSession(sam, invite);
+  coOpword.joinSession(pat, invite);
+  assert.throws(() => coOpword.offerFriendship(ada, invite, "Nobody"));
+
+  coOpword.offerFriendship(ada, invite, "Sam");
+  assert.throws(() => coOpword.offerFriendship(ada, invite, "Sam"));
+  assert.deepEqual(coOpword.sessionAlerts(sam, invite), [{ displayName: "Ada", kind: "pending" }]);
+  assert.deepEqual(coOpword.friends(ada), []);
+
+  coOpword.declineFriendship(sam, invite, "Ada");
+  assert.deepEqual(coOpword.sessionAlerts(ada, invite), [{ displayName: "Sam", kind: "declined" }]);
+  assert.deepEqual(coOpword.sessionAlerts(sam, invite), []);
+  assert.deepEqual(coOpword.sessionAlerts(pat, invite), []);
+  assert.throws(() => coOpword.offerFriendship(ada, invite, "Sam"));
+  assert.throws(() => coOpword.offerFriendship(sam, invite, "Ada"));
+
+  const other = coOpword.startSession(ada, "Tiny").invite;
+  coOpword.joinSession(sam, other);
+  coOpword.offerFriendship(sam, other, "Ada");
+  coOpword.offerFriendship(ada, other, "Sam");
+  assert.deepEqual(coOpword.friends(ada), [{ displayName: "Sam" }]);
+  assert.deepEqual(coOpword.sessionAlerts(ada, invite), [{ displayName: "Sam", kind: "declined" }]);
+
+  const kept = openCoOpword();
+  kept.noteTime(0);
+  const ada2 = signedIn(kept, "ada@example.com", "Ada");
+  const sam2 = signedIn(kept, "sam@example.com", "Sam");
+  kept.admitLibraryCrossword(tinyCrossword);
+  const fresh = kept.startSession(ada2, "Tiny").invite;
+  kept.joinSession(sam2, fresh);
+  kept.openSession(ada2, fresh);
+  kept.offerFriendship(ada2, fresh, "Sam");
+  kept.declineFriendship(sam2, fresh, "Ada");
+  kept.noteTime(6 * 24 * 60 * 60 * 1000);
+  kept.selectSquare(ada2, fresh, 0);
+  kept.noteTime(WEEK);
+  assert.throws(() => kept.openSession(sam2, fresh));
+  kept.joinSession(sam2, fresh);
+  assert.deepEqual(kept.sessionAlerts(ada2, fresh), [{ displayName: "Sam", kind: "declined" }]);
+  assert.throws(() => kept.offerFriendship(ada2, fresh, "Sam"));
+
+  const pending = kept.startSession(ada2, "Tiny").invite;
+  kept.joinSession(sam2, pending);
+  kept.offerFriendship(ada2, pending, "Sam");
+  kept.noteTime(WEEK + 6 * 24 * 60 * 60 * 1000);
+  kept.selectSquare(ada2, pending, 1);
+  kept.noteTime(WEEK + WEEK);
+  kept.joinSession(sam2, pending);
+  assert.deepEqual(kept.sessionAlerts(sam2, pending), []);
+  kept.offerFriendship(ada2, pending, "Sam");
+  assert.deepEqual(kept.sessionAlerts(sam2, pending), [{ displayName: "Ada", kind: "pending" }]);
+});
+
+test("typing an email invites that address into the Session and does not make a Friend", () => {
+  const coOpword = openCoOpword();
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  const sam = signedIn(coOpword, "sam@example.com", "Sam");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  const invite = coOpword.startSession(ada, "Tiny").invite;
+
+  const existing = coOpword.inviteEmail(ada, invite, "Sam@Example.com");
+  assert.equal(existing.token, null);
+  assert.equal(coOpword.openSession(sam, invite).players.some((player) => player.displayName === "Sam"), true);
+  assert.deepEqual(coOpword.friends(ada), []);
+
+  const issued = coOpword.inviteEmail(ada, invite, "new@example.com");
+  const newbie = coOpword.openMagicLink(issued.token ?? "");
+  coOpword.chooseDisplayName(newbie, "New");
+  assert.equal(coOpword.openSession(newbie, invite).title, "Tiny");
+  assert.deepEqual(coOpword.friends(ada), []);
+  assert.deepEqual(coOpword.friends(newbie), []);
+});
+
+test("withdrawing a published Crossword leaves the Session and the Completion alone", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  const issued = coOpword.publishCrossword(ada, tinyCrossword, "Ada");
+  const invite = coOpword.startPublishedSession(ada, "Tiny", "Ada").invite;
+  coOpword.selectSquare(ada, invite, 0);
+  coOpword.typeLetter(ada, invite, "B");
+  coOpword.withdrawCrossword(issued.withdrawToken);
+  assert.equal(coOpword.published(ada).length, 0);
+  const opened = coOpword.openSession(ada, invite);
+  assert.equal(opened.squares[0].letter, "B");
+  assert.equal(opened.squares[0].locked, true);
+  assert.equal(opened.words[0].clue, "Nine As");
+
+  coOpword.clearSquare(ada, invite, 0);
+  coOpword.noteTime(1000);
+  fillSolved(coOpword, ada, invite);
+  assert.equal(coOpword.completions(ada)[0].author, "Ada");
+
+  const again = coOpword.publishCrossword(ada, tinyCrossword, "Ada");
+  const second = coOpword.startPublishedSession(ada, "Tiny", "Ada").invite;
+  fillSolved(coOpword, ada, second);
+  coOpword.withdrawCrossword(again.withdrawToken);
+  assert.equal(coOpword.completions(ada).every((completion) => completion.title === "Tiny" && completion.author === "Ada"), true);
+  assert.equal(coOpword.published(ada).length, 0);
+});
