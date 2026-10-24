@@ -186,7 +186,7 @@ const server = createServer(async (request, response) => {
       send(
         response,
         200,
-        `<h1>${escapeHtml(opened.title)}</h1><table>${rows.join("")}</table><ul>${clues}</ul><p><a href="/library">Library</a></p>`,
+        `<h1>${escapeHtml(opened.title)}</h1><table>${rows.join("")}</table><ul>${clues}</ul><form method="post" action="/session"><input type="hidden" name="title" value="${escapeHtml(opened.title)}"><button type="submit">Start a Session</button></form><p><a href="/library">Library</a></p>`,
       );
     } catch {
       send(response, 404, `<p>That Crossword is not in the library.</p>`);
@@ -281,6 +281,92 @@ const server = createServer(async (request, response) => {
       send(response, 200, `<h1>${escapeHtml(opened.title)}</h1><p>${author}</p><p>${opened.words.length} Words</p>`);
     } catch {
       send(response, 404, `<p>That Crossword is not published.</p>`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/session") {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    const body = await readBody(request);
+    try {
+      const started = coOpword.startSession({ token }, body.get("title") ?? "");
+      writeSnapshot(statePath, coOpword.snapshot());
+      send(response, 303, `<p>Session</p>`, { location: `/session?invite=${encodeURIComponent(started.invite)}` });
+    } catch {
+      send(response, 404, `<p>That Crossword is not in the library.</p>`);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/join") {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    const invite = url.searchParams.get("invite") ?? "";
+    try {
+      coOpword.joinSession({ token }, invite);
+      writeSnapshot(statePath, coOpword.snapshot());
+      send(response, 303, `<p>Session</p>`, { location: `/session?invite=${encodeURIComponent(invite)}` });
+    } catch {
+      send(response, 404, `<p>That Invite is no longer valid.</p>`);
+    }
+    return;
+  }
+
+  if (url.pathname === "/session" && request.method === "GET") {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    const invite = url.searchParams.get("invite") ?? "";
+    try {
+      const opened = coOpword.openSession({ token }, invite);
+      const rows = [];
+      for (let row = 0; row < opened.size; row++) {
+        const cells = opened.squares.slice(row * opened.size, (row + 1) * opened.size).map((square) => {
+          if (square.block) return `<td></td>`;
+          const names = square.present.filter((name) => name !== "").join(", ");
+          return `<td>${escapeHtml(square.letter ?? "")}${names ? `<br>${escapeHtml(names)}` : ""}</td>`;
+        });
+        rows.push(`<tr>${cells.join("")}</tr>`);
+      }
+      const clues = opened.words.map((word) => `<li>${word.direction} ${word.length}: ${escapeHtml(word.clue)}</li>`).join("");
+      const link = `/join?invite=${encodeURIComponent(opened.invite)}`;
+      send(
+        response,
+        200,
+        `<style>table{width:100%;max-width:36rem;border-collapse:collapse}td{border:1px solid;height:2rem;text-align:center}</style><h1>${escapeHtml(opened.title)}</h1><p>Invite <code>${escapeHtml(opened.invite)}</code> <a href="${link}">${link}</a></p><table>${rows.join("")}</table><ul>${clues}</ul><form method="post" action="/session/letter"><input type="hidden" name="invite" value="${escapeHtml(opened.invite)}"><label>Square <input name="index" inputmode="numeric"></label><label>Letter <input name="letter" maxlength="1"></label><button type="submit" name="act" value="letter">Type</button><button type="submit" formaction="/session/select">Select</button><button type="submit" formaction="/session/clear">Clear</button></form>`,
+      );
+    } catch {
+      send(response, 404, `<p>That Invite is not yours.</p>`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && (url.pathname === "/session/letter" || url.pathname === "/session/select" || url.pathname === "/session/clear")) {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, `<p>Sign in.</p>`, { location: "/" });
+      return;
+    }
+    const body = await readBody(request);
+    const invite = body.get("invite") ?? "";
+    const index = Number(body.get("index"));
+    try {
+      if (url.pathname === "/session/select") coOpword.selectSquare({ token }, invite, index);
+      else if (url.pathname === "/session/clear") coOpword.clearSquare({ token }, invite, index);
+      else coOpword.typeLetter({ token }, invite, index, body.get("letter") ?? "");
+      writeSnapshot(statePath, coOpword.snapshot());
+      send(response, 303, `<p>Session</p>`, { location: `/session?invite=${encodeURIComponent(invite)}` });
+    } catch {
+      send(response, 400, `<p>That Square did not take the letter.</p>`);
     }
     return;
   }

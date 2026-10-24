@@ -48,12 +48,31 @@ type PublishedCrossword = {
   withdrawToken: string;
 };
 
+type LiveSession = {
+  invite: string;
+  crossword: OpenedLibraryCrossword;
+  letters: (string | null)[];
+  locked: boolean[];
+  presence: { playerId: string; index: number }[];
+  memberIds: string[];
+};
+
 type State = {
   players: Player[];
   magicLinks: { token: string; email: string }[];
   sessions: { token: string; playerId: string }[];
   library: OpenedLibraryCrossword[];
   published: PublishedCrossword[];
+  liveSessions: LiveSession[];
+};
+
+export type OpenedSession = {
+  invite: string;
+  title: string;
+  size: number;
+  squares: { letter: string | null; locked: boolean; present: string[]; block: boolean }[];
+  words: OpenedLibraryCrossword["words"];
+  players: { displayName: string | null }[];
 };
 
 export type CoOpword = {
@@ -69,6 +88,12 @@ export type CoOpword = {
   published(session: PlayerSession): { title: string; author: string }[];
   openPublishedCrossword(session: PlayerSession, title: string, author: string): OpenedLibraryCrossword & { author: string };
   withdrawCrossword(token: string): void;
+  startSession(session: PlayerSession, title: string): { invite: string };
+  joinSession(session: PlayerSession, invite: string): { invite: string };
+  openSession(session: PlayerSession, invite: string): OpenedSession;
+  selectSquare(session: PlayerSession, invite: string, index: number): void;
+  typeLetter(session: PlayerSession, invite: string, index: number, letter: string): void;
+  clearSquare(session: PlayerSession, invite: string, index: number): void;
   snapshot(): string;
 };
 
@@ -88,6 +113,7 @@ export function openCoOpword(snapshot?: string): CoOpword {
     sessions: parsed.sessions ?? [],
     library: parsed.library ?? [],
     published: parsed.published ?? [],
+    liveSessions: parsed.liveSessions ?? [],
   };
 
   function playerFor(session: PlayerSession): Player {
@@ -202,7 +228,90 @@ export function openCoOpword(snapshot?: string): CoOpword {
       if (index === -1) throw new CrosswordRejected();
       state.published.splice(index, 1);
     },
+    startSession(session: PlayerSession, title: string): { invite: string } {
+      const player = playerFor(session);
+      const crossword = structuredClone(this.openLibraryCrossword(session, title));
+      const invite = crypto.randomUUID();
+      state.liveSessions.push({
+        invite,
+        crossword,
+        letters: crossword.squares.map(() => null),
+        locked: crossword.squares.map(() => false),
+        presence: [],
+        memberIds: [player.id],
+      });
+      return { invite };
+    },
+    joinSession(session: PlayerSession, invite: string): { invite: string } {
+      const player = playerFor(session);
+      const live = liveFor(invite);
+      if (!live.memberIds.includes(player.id)) live.memberIds.push(player.id);
+      return { invite: live.invite };
+    },
+    openSession(session: PlayerSession, invite: string): OpenedSession {
+      const player = playerFor(session);
+      const live = liveFor(invite);
+      if (!live.memberIds.includes(player.id)) throw new Error("That Invite is not yours");
+      return openedSession(live);
+    },
+    selectSquare(session: PlayerSession, invite: string, index: number): void {
+      const player = playerFor(session);
+      const live = liveFor(invite);
+      requireMember(live, player.id);
+      requireWhite(live, index);
+      live.presence = live.presence.filter((entry) => entry.playerId !== player.id);
+      live.presence.push({ playerId: player.id, index });
+    },
+    typeLetter(session: PlayerSession, invite: string, index: number, letter: string): void {
+      const player = playerFor(session);
+      const live = liveFor(invite);
+      requireMember(live, player.id);
+      requireWhite(live, index);
+      if (!/^[A-Za-z]$/.test(letter)) throw new CrosswordRejected();
+      if (live.locked[index]) throw new CrosswordRejected();
+      live.letters[index] = letter.toUpperCase();
+      live.locked[index] = true;
+    },
+    clearSquare(session: PlayerSession, invite: string, index: number): void {
+      const player = playerFor(session);
+      const live = liveFor(invite);
+      requireMember(live, player.id);
+      requireWhite(live, index);
+      live.letters[index] = null;
+      live.locked[index] = false;
+    },
   };
+
+  function liveFor(invite: string): LiveSession {
+    const live = state.liveSessions.find((entry) => entry.invite === invite);
+    if (!live) throw new Error("That Invite is no longer valid");
+    return live;
+  }
+
+  function requireMember(live: LiveSession, playerId: string): void {
+    if (!live.memberIds.includes(playerId)) throw new Error("That Invite is not yours");
+  }
+
+  function requireWhite(live: LiveSession, index: number): void {
+    if (live.crossword.squares[index] === "#" || live.crossword.squares[index] === undefined) throw new CrosswordRejected();
+  }
+
+  function openedSession(live: LiveSession): OpenedSession {
+    const nameOf = (playerId: string) => state.players.find((player) => player.id === playerId)?.displayName ?? null;
+    return {
+      invite: live.invite,
+      title: live.crossword.title,
+      size: live.crossword.size,
+      squares: live.crossword.squares.map((square, index) => ({
+        letter: square === "#" ? null : live.letters[index],
+        locked: live.locked[index],
+        present: live.presence.filter((entry) => entry.index === index).map((entry) => nameOf(entry.playerId) ?? ""),
+        block: square === "#",
+      })),
+      words: live.crossword.words,
+      players: live.memberIds.map((playerId) => ({ displayName: nameOf(playerId) })),
+    };
+  }
 }
 
 function checkedLibraryCrossword(crossword: LibraryCrosswordInput): OpenedLibraryCrossword {
