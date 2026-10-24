@@ -1,8 +1,16 @@
+<div class="sheet">
+{{header}}
 <h1>{{title}}</h1>
-<table class="grid">{{rows}}</table>
-<ul>{{clues}}</ul>
-<form method="post" action="/session">
-  <input type="hidden" name="title" value="{{title}}">
-  <button type="submit">Start a Session</button>
-</form>
-<p><a href="/library">Library</a></p>
+<div class="board">
+  <table class="grid">{{rows}}</table>
+  <div class="controls">
+    <form method="post" action="/session">
+      <input type="hidden" name="title" value="{{title}}">
+      <button type="submit">Start a Session</button>
+    </form>
+    <p><a href="/library">Library</a></p>
+  </div>
+</div>
+{{clues}}
+{{footer}}
+</div>
