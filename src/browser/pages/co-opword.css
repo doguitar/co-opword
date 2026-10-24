@@ -102,18 +102,23 @@
 }
 
 .sheet button.filled,
-.sheet button.plain {
+.sheet button.plain,
+.spread button.filled,
+.spread button.plain {
   font: inherit;
   padding: 0.35rem 0.6rem;
+  border-radius: 0;
 }
 
-.sheet button.filled {
+.sheet button.filled,
+.spread button.filled {
   background: #1a1a1a;
   color: #fff;
   border: 1px solid #1a1a1a;
 }
 
-.sheet button.plain {
+.sheet button.plain,
+.spread button.plain {
   background: transparent;
   color: #1a1a1a;
   border: 0;
