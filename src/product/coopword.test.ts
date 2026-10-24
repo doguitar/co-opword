@@ -558,6 +558,68 @@ test("typing an email invites that address into the Session and does not make a 
   assert.deepEqual(coOpword.friends(newbie), []);
 });
 
+test("opening an email invite magic link signs the new Player into that Session Grid before they choose a display name", () => {
+  const coOpword = openCoOpword();
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  const invite = coOpword.startSession(ada, "Tiny").invite;
+
+  const issued = coOpword.inviteEmail(ada, invite, "new@example.com");
+  const newbie = coOpword.openMagicLink(issued.token ?? "");
+  assert.equal(newbie.invite, invite);
+  assert.deepEqual(coOpword.whoAmI(newbie), { displayName: null });
+
+  assert.ok(newbie.invite);
+  const grid = coOpword.openSession(newbie, newbie.invite);
+  assert.equal(grid.title, "Tiny");
+  assert.equal(grid.invite, invite);
+  assert.equal(grid.squares[0].letter, null);
+  assert.equal(grid.squares[0].block, false);
+  assert.equal(grid.squares[9].block, true);
+  assert.deepEqual(coOpword.friends(ada), []);
+  assert.deepEqual(coOpword.friends(newbie), []);
+
+  coOpword.chooseDisplayName(newbie, "New");
+  assert.deepEqual(coOpword.whoAmI(newbie), { displayName: "New" });
+
+  const kept = openCoOpword(coOpword.snapshot());
+  const restored = kept.openSession(newbie, invite);
+  assert.equal(restored.title, "Tiny");
+  assert.equal(restored.squares[0].letter, null);
+  assert.equal(restored.squares[9].block, true);
+});
+
+test("a plain sign-in magic link identifies no Invite, and an ended Session still signs the new Player in", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  const invite = coOpword.startSession(ada, "Tiny").invite;
+
+  const plain = coOpword.openMagicLink(coOpword.requestMagicLink("plain@example.com").token);
+  assert.equal(plain.invite, null);
+  assert.throws(() => coOpword.openSession(plain, invite));
+
+  const issued = coOpword.inviteEmail(ada, invite, "late@example.com");
+  coOpword.noteTime(WEEK);
+  const late = coOpword.openMagicLink(issued.token ?? "");
+  assert.equal(late.invite, null);
+  assert.deepEqual(coOpword.whoAmI(late), { displayName: null });
+  assert.throws(() => coOpword.openSession(late, invite));
+});
+
+test("opening the same magic link a second time does not sign anyone in", () => {
+  const coOpword = openCoOpword();
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  const invite = coOpword.startSession(ada, "Tiny").invite;
+  const token = coOpword.inviteEmail(ada, invite, "new@example.com").token ?? "";
+  const newbie = coOpword.openMagicLink(token);
+  assert.throws(() => coOpword.openMagicLink(token));
+  assert.deepEqual(coOpword.whoAmI(newbie), { displayName: null });
+  assert.equal(coOpword.openSession(newbie, invite).title, "Tiny");
+});
+
 test("withdrawing a published Crossword leaves the Session and the Completion alone", () => {
   const coOpword = openCoOpword();
   coOpword.noteTime(0);

@@ -104,7 +104,7 @@ export type OpenedSession = {
 
 export type CoOpword = {
   requestMagicLink(email: string): MagicLink;
-  openMagicLink(token: string): PlayerSession;
+  openMagicLink(token: string): PlayerSession & { invite: string | null };
   chooseDisplayName(session: PlayerSession, displayName: string): void;
   whoAmI(session: PlayerSession): SignedInPlayer;
   playersOthersSee(session: PlayerSession): { displayName: string }[];
@@ -176,7 +176,7 @@ export function openCoOpword(snapshot?: string): CoOpword {
       state.magicLinks.push({ token, email: normalized });
       return { token, email: normalized };
     },
-    openMagicLink(token: string): PlayerSession {
+    openMagicLink(token: string): PlayerSession & { invite: string | null } {
       const linkIndex = state.magicLinks.findIndex((link) => link.token === token);
       if (linkIndex === -1) {
         throw new Error("That magic link is no longer valid");
@@ -189,11 +189,9 @@ export function openCoOpword(snapshot?: string): CoOpword {
       }
       const session = { token: crypto.randomUUID(), playerId: player.id };
       state.sessions.push(session);
-      if (link.invite) {
-        const live = state.liveSessions.find((entry) => entry.invite === link.invite);
-        if (live && !live.memberIds.includes(player.id)) addMember(live, player.id);
-      }
-      return { token: session.token };
+      const live = link.invite === undefined ? undefined : state.liveSessions.find((entry) => entry.invite === link.invite);
+      if (live && !live.memberIds.includes(player.id)) addMember(live, player.id);
+      return { token: session.token, invite: live?.invite ?? null };
     },
     noteTime(value: number): void {
       now = value;

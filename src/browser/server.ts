@@ -162,7 +162,7 @@ const server = createServer(async (request, response) => {
       const session = coOpword.openMagicLink(url.searchParams.get("token") ?? "");
       writeSnapshot(statePath, coOpword.snapshot());
       send(response, 303, message("Signed in."), {
-        location: "/",
+        location: session.invite === null ? "/" : `/session?invite=${encodeURIComponent(session.invite)}`,
         "set-cookie": `player=${encodeURIComponent(session.token)}; HttpOnly; Path=/; SameSite=Lax`,
       });
     } catch {
