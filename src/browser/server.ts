@@ -342,7 +342,7 @@ const server = createServer(async (request, response) => {
       send(
         response,
         200,
-        `<style>table{width:100%;max-width:36rem;border-collapse:collapse}td{border:1px solid;height:2rem;text-align:center}</style><h1>${escapeHtml(opened.title)}</h1><p>Invite <code>${escapeHtml(opened.invite)}</code> <a href="${link}">${link}</a></p><table>${rows.join("")}</table><ul>${clues}</ul><form method="post" action="/session/letter"><input type="hidden" name="invite" value="${escapeHtml(opened.invite)}"><label>Square <input name="index" inputmode="numeric"></label><label>Letter <input name="letter" maxlength="1"></label><button type="submit" name="act" value="letter">Type</button><button type="submit" formaction="/session/select">Select</button><button type="submit" formaction="/session/clear">Clear</button></form>`,
+        `<style>table{width:100%;max-width:36rem;border-collapse:collapse}td{border:1px solid;height:2rem;text-align:center}</style><h1>${escapeHtml(opened.title)}</h1><p>Invite <code>${escapeHtml(opened.invite)}</code> <a href="${link}">${link}</a></p><table>${rows.join("")}</table><ul>${clues}</ul><form method="post" action="/session/letter"><input type="hidden" name="invite" value="${escapeHtml(opened.invite)}"><label>Square <input name="index" inputmode="numeric"></label><label>Letter <input name="letter" maxlength="1"></label><button type="submit" name="act" value="letter">Type</button><button type="submit" formaction="/session/select">Select</button><button type="submit" formaction="/session/clear">Clear</button><button type="submit" formaction="/session/close">Close</button></form>`,
       );
     } catch {
       send(response, 404, `<p>That Invite is not yours.</p>`);
@@ -350,7 +350,7 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  if (request.method === "POST" && (url.pathname === "/session/letter" || url.pathname === "/session/select" || url.pathname === "/session/clear")) {
+  if (request.method === "POST" && (url.pathname === "/session/letter" || url.pathname === "/session/select" || url.pathname === "/session/clear" || url.pathname === "/session/close")) {
     const token = readCookie(request, "player");
     if (!token) {
       send(response, 303, `<p>Sign in.</p>`, { location: "/" });
@@ -362,9 +362,11 @@ const server = createServer(async (request, response) => {
     try {
       if (url.pathname === "/session/select") coOpword.selectSquare({ token }, invite, index);
       else if (url.pathname === "/session/clear") coOpword.clearSquare({ token }, invite, index);
-      else coOpword.typeLetter({ token }, invite, index, body.get("letter") ?? "");
+      else if (url.pathname === "/session/close") coOpword.closeSession({ token }, invite);
+      else coOpword.typeLetter({ token }, invite, body.get("letter") ?? "");
       writeSnapshot(statePath, coOpword.snapshot());
-      send(response, 303, `<p>Session</p>`, { location: `/session?invite=${encodeURIComponent(invite)}` });
+      const next = url.pathname === "/session/close" ? "/" : `/session?invite=${encodeURIComponent(invite)}`;
+      send(response, 303, `<p>Session</p>`, { location: next });
     } catch {
       send(response, 400, `<p>That Square did not take the letter.</p>`);
     }

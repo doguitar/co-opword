@@ -345,12 +345,12 @@ test("two Players fill one Session from a library Crossword, and the first lette
   assert.deepEqual(present.squares[0].present, []);
   assert.deepEqual(present.squares[1].present.sort(), ["Ada", "Sam"]);
 
-  coOpword.typeLetter(ada, first.invite, 1, "b");
-  assert.throws(() => coOpword.typeLetter(sam, first.invite, 1, "C"), CrosswordRejected);
+  coOpword.typeLetter(ada, first.invite, "b");
+  assert.throws(() => coOpword.typeLetter(sam, first.invite, "C"), CrosswordRejected);
   assert.equal(coOpword.openSession(sam, first.invite).squares[1].letter, "B");
 
   coOpword.clearSquare(sam, first.invite, 1);
-  coOpword.typeLetter(sam, first.invite, 1, "C");
+  coOpword.typeLetter(sam, first.invite, "C");
 
   const kept = openCoOpword(coOpword.snapshot());
   const restored = kept.openSession(ada, first.invite);
@@ -358,4 +358,32 @@ test("two Players fill one Session from a library Crossword, and the first lette
   assert.equal(restored.squares[1].locked, true);
   assert.deepEqual(restored.players.map((player) => player.displayName).sort(), ["Ada", "Sam"]);
   assert.equal(kept.openLibraryCrossword(ada, "Tiny").squares[1], "A");
+});
+
+test("a Player can be in two Sessions, and a letter lands only on the Square selected in that Session", () => {
+  const coOpword = openCoOpword();
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  const sam = signedIn(coOpword, "sam@example.com", "Sam");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  const first = coOpword.startSession(ada, "Tiny");
+  const second = coOpword.startSession(ada, "Tiny");
+  coOpword.joinSession(sam, first.invite);
+  coOpword.openSession(sam, first.invite);
+
+  coOpword.typeLetter(ada, first.invite, "B");
+  assert.equal(coOpword.openSession(sam, first.invite).squares[0].letter, null);
+
+  coOpword.selectSquare(ada, first.invite, 0);
+  coOpword.selectSquare(ada, second.invite, 2);
+  coOpword.typeLetter(ada, first.invite, "B");
+  assert.equal(coOpword.openSession(sam, first.invite).squares[0].letter, "B");
+  assert.equal(coOpword.openSession(ada, second.invite).squares[2].letter, null);
+  assert.deepEqual(coOpword.openSession(ada, second.invite).squares[0].present, []);
+
+  coOpword.closeSession(ada, first.invite);
+  const stillThere = coOpword.openSession(sam, first.invite);
+  assert.deepEqual(stillThere.squares[0].present, []);
+  assert.deepEqual(stillThere.players.map((player) => player.displayName).sort(), ["Ada", "Sam"]);
+  const kept = openCoOpword(coOpword.snapshot());
+  assert.equal(kept.openSession(ada, first.invite).squares[0].letter, "B");
 });

@@ -57,6 +57,8 @@ type LiveSession = {
   memberIds: string[];
 };
 
+type OpenView = { playerId: string; invite: string };
+
 type State = {
   players: Player[];
   magicLinks: { token: string; email: string }[];
@@ -64,6 +66,7 @@ type State = {
   library: OpenedLibraryCrossword[];
   published: PublishedCrossword[];
   liveSessions: LiveSession[];
+  openViews: OpenView[];
 };
 
 export type OpenedSession = {
@@ -92,8 +95,9 @@ export type CoOpword = {
   joinSession(session: PlayerSession, invite: string): { invite: string };
   openSession(session: PlayerSession, invite: string): OpenedSession;
   selectSquare(session: PlayerSession, invite: string, index: number): void;
-  typeLetter(session: PlayerSession, invite: string, index: number, letter: string): void;
+  typeLetter(session: PlayerSession, invite: string, letter: string): void;
   clearSquare(session: PlayerSession, invite: string, index: number): void;
+  closeSession(session: PlayerSession, invite: string): void;
   snapshot(): string;
 };
 
@@ -114,6 +118,7 @@ export function openCoOpword(snapshot?: string): CoOpword {
     library: parsed.library ?? [],
     published: parsed.published ?? [],
     liveSessions: parsed.liveSessions ?? [],
+    openViews: parsed.openViews ?? [],
   };
 
   function playerFor(session: PlayerSession): Player {
@@ -240,6 +245,7 @@ export function openCoOpword(snapshot?: string): CoOpword {
         presence: [],
         memberIds: [player.id],
       });
+      state.openViews.push({ playerId: player.id, invite });
       return { invite };
     },
     joinSession(session: PlayerSession, invite: string): { invite: string } {
@@ -252,25 +258,31 @@ export function openCoOpword(snapshot?: string): CoOpword {
       const player = playerFor(session);
       const live = liveFor(invite);
       if (!live.memberIds.includes(player.id)) throw new Error("That Invite is not yours");
+      if (!state.openViews.some((view) => view.playerId === player.id && view.invite === invite)) {
+        state.openViews.push({ playerId: player.id, invite });
+      }
       return openedSession(live);
     },
     selectSquare(session: PlayerSession, invite: string, index: number): void {
       const player = playerFor(session);
       const live = liveFor(invite);
       requireMember(live, player.id);
+      requireOpen(player.id, invite);
       requireWhite(live, index);
       live.presence = live.presence.filter((entry) => entry.playerId !== player.id);
       live.presence.push({ playerId: player.id, index });
     },
-    typeLetter(session: PlayerSession, invite: string, index: number, letter: string): void {
+    typeLetter(session: PlayerSession, invite: string, letter: string): void {
       const player = playerFor(session);
       const live = liveFor(invite);
       requireMember(live, player.id);
-      requireWhite(live, index);
+      if (!isOpen(player.id, invite)) return;
+      const selected = live.presence.find((entry) => entry.playerId === player.id);
+      if (!selected) return;
       if (!/^[A-Za-z]$/.test(letter)) throw new CrosswordRejected();
-      if (live.locked[index]) throw new CrosswordRejected();
-      live.letters[index] = letter.toUpperCase();
-      live.locked[index] = true;
+      if (live.locked[selected.index]) throw new CrosswordRejected();
+      live.letters[selected.index] = letter.toUpperCase();
+      live.locked[selected.index] = true;
     },
     clearSquare(session: PlayerSession, invite: string, index: number): void {
       const player = playerFor(session);
@@ -280,7 +292,22 @@ export function openCoOpword(snapshot?: string): CoOpword {
       live.letters[index] = null;
       live.locked[index] = false;
     },
+    closeSession(session: PlayerSession, invite: string): void {
+      const player = playerFor(session);
+      const live = liveFor(invite);
+      requireMember(live, player.id);
+      state.openViews = state.openViews.filter((view) => view.playerId !== player.id || view.invite !== invite);
+      live.presence = live.presence.filter((entry) => entry.playerId !== player.id);
+    },
   };
+
+  function isOpen(playerId: string, invite: string): boolean {
+    return state.openViews.some((view) => view.playerId === playerId && view.invite === invite);
+  }
+
+  function requireOpen(playerId: string, invite: string): void {
+    if (!isOpen(playerId, invite)) throw new Error("That Session is not open");
+  }
 
   function liveFor(invite: string): LiveSession {
     const live = state.liveSessions.find((entry) => entry.invite === invite);
