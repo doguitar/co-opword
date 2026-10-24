@@ -2,6 +2,10 @@
 
 See `CODING_STANDARDS.md`. Browser, mail, and storage each live in their own module.
 
+## Browser check
+
+A feature that changes what a Player sees or does in the browser is exercised in the browser before it is committed. Product tests are not a substitute for that pass.
+
 ## Agent skills
 
 ### Issue tracker
