@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --experimental-strip-types --test src/product/coopword.test.ts",
+    "test": "node --experimental-strip-types --test src/product/coopword.test.ts src/browser/server.test.ts",
     "typecheck": "tsc --noEmit",
     "start": "node --experimental-strip-types src/browser/server.ts"
   },

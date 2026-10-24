@@ -384,16 +384,17 @@ const server = createServer(async (request, response) => {
     const body = await readBody(request);
     const invite = body.get("invite") ?? "";
     const index = Number(body.get("index"));
+    const sessionPath = `/session?invite=${encodeURIComponent(invite)}`;
     try {
       if (url.pathname === "/session/select") coOpword.selectSquare({ token }, invite, index);
       else if (url.pathname === "/session/clear") coOpword.clearSquare({ token }, invite, index);
       else if (url.pathname === "/session/close") coOpword.closeSession({ token }, invite);
       else coOpword.typeLetter({ token }, invite, body.get("letter") ?? "");
       writeSnapshot(statePath, coOpword.snapshot());
-      const next = url.pathname === "/session/close" ? "/" : `/session?invite=${encodeURIComponent(invite)}`;
+      const next = url.pathname === "/session/close" ? "/" : sessionPath;
       send(response, 303, message("Session"), { location: next });
     } catch {
-      send(response, 400, message("That Square did not take the letter."));
+      send(response, 400, messageLink("That Square did not take the letter.", sessionPath, "Back"));
     }
     return;
   }
