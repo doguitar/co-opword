@@ -181,3 +181,101 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     }
   }
 });
+
+test("a signed-in Player sees the Grid and Words of a published Freestyle Crossword and a published Standard Crossword", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  const stamp = Date.now();
+  const title = `Pair${stamp}`;
+  const standardTitle = `Block${stamp}`;
+  try {
+    const sent = await send(port, "POST", "/sign-in", null, { email: `ada${stamp}@example.com` });
+    const magic = sent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
+    const signed = await send(port, "GET", magic, null);
+    const cookie = signed.cookie;
+    assert.ok(cookie);
+
+    const blankCrossword = {
+      title,
+      kind: "freestyle",
+      size: 9,
+      squares: Array.from({ length: 81 }, (_, index) => {
+        const row = Math.floor(index / 9);
+        const column = index % 9;
+        if (row === 0 && column < 3) return "CAT"[column];
+        if (row === 1 && column < 3) return "DOG"[column];
+        return "#";
+      }),
+      words: [
+        { direction: "across", row: 0, column: 0, answer: "CAT", clue: "Feline" },
+        { direction: "across", row: 1, column: 0, answer: "DOG", clue: "Hound" },
+      ],
+    };
+    const namedCrossword = {
+      title,
+      kind: "freestyle",
+      size: 9,
+      squares: Array.from({ length: 81 }, (_, index) => (Math.floor(index / 9) === 0 ? "A" : "#")),
+      words: [{ direction: "across", row: 0, column: 0, answer: "AAAAAAAAA", clue: "Nine As" }],
+    };
+    const standardCrossword = {
+      title: standardTitle,
+      kind: "standard",
+      size: 15,
+      squares: Array.from({ length: 225 }, () => "A"),
+      words: Array.from({ length: 15 }, (_, index) => [
+        { direction: "across", row: index, column: 0, answer: "A".repeat(15), clue: `Across ${index + 1}` },
+        { direction: "down", row: 0, column: index, answer: "A".repeat(15), clue: `Down ${index + 1}` },
+      ]).flat(),
+    };
+
+    assert.equal((await send(port, "POST", "/publish", cookie, { author: "", crossword: JSON.stringify(blankCrossword) })).status, 200);
+    assert.equal((await send(port, "POST", "/publish", cookie, { author: "Ada", crossword: JSON.stringify(namedCrossword) })).status, 200);
+    assert.equal((await send(port, "POST", "/publish", cookie, { author: "Ada", crossword: JSON.stringify(standardCrossword) })).status, 200);
+
+    const blank = await send(port, "GET", `/published-crossword?title=${encodeURIComponent(title)}&author=`, cookie);
+    assert.equal(blank.status, 200);
+    assert.match(blank.body, new RegExp(`<h1>${title}</h1>`));
+    assert.match(blank.body, /<p>no Author<\/p>/);
+    assert.match(
+      blank.body,
+      /<table class="grid">\s*<tr>\s*<td>C<\/td>\s*<td>A<\/td>\s*<td>T<\/td>(?:\s*<td class="block"><\/td>){6}\s*<\/tr>\s*<tr>\s*<td>D<\/td>\s*<td>O<\/td>\s*<td>G<\/td>(?:\s*<td class="block"><\/td>){6}\s*<\/tr>(?:\s*<tr>(?:\s*<td class="block"><\/td>){9}\s*<\/tr>){7}\s*<\/table>/,
+    );
+    assert.match(blank.body, /<ul>\s*<li>across 3: Feline<\/li>\s*<li>across 3: Hound<\/li>\s*<\/ul>/);
+    assert.match(blank.body, /<p>2 Words<\/p>/);
+    assert.match(blank.body, new RegExp(`<input type="hidden" name="title" value="${title}">`));
+    assert.match(blank.body, /<input type="hidden" name="author" value="">/);
+    assert.equal(blank.body.includes('value="no Author"'), false);
+    assert.match(blank.body, /<button type="submit">Start a Session<\/button>/);
+
+    const named = await send(port, "GET", `/published-crossword?title=${encodeURIComponent(title)}&author=${encodeURIComponent("Ada")}`, cookie);
+    assert.equal(named.status, 200);
+    assert.match(named.body, /<p>Ada<\/p>/);
+    assert.match(named.body, /<table class="grid">\s*<tr>(?:\s*<td>A<\/td>){9}\s*<\/tr>(?:\s*<tr>(?:\s*<td class="block"><\/td>){9}\s*<\/tr>){8}\s*<\/table>/);
+    assert.match(named.body, /<ul>\s*<li>across 9: Nine As<\/li>\s*<\/ul>/);
+    assert.match(named.body, /<p>1 Words<\/p>/);
+    assert.match(named.body, /<input type="hidden" name="author" value="Ada">/);
+
+    const standard = await send(port, "GET", `/published-crossword?title=${encodeURIComponent(standardTitle)}&author=${encodeURIComponent("Ada")}`, cookie);
+    assert.equal(standard.status, 200);
+    assert.match(standard.body, new RegExp(`<h1>${standardTitle}</h1>`));
+    assert.match(standard.body, /<table class="grid">(?:\s*<tr>(?:\s*<td>A<\/td>){15}\s*<\/tr>){15}\s*<\/table>/);
+    assert.equal(standard.body.includes('class="block"'), false);
+    assert.match(standard.body, /<ul>\s*<li>across 15: Across 1<\/li>\s*<li>down 15: Down 1<\/li>\s*<li>across 15: Across 2<\/li>/);
+    assert.match(standard.body, /<li>across 15: Across 15<\/li>\s*<li>down 15: Down 15<\/li>\s*<\/ul>/);
+    assert.match(standard.body, /<p>30 Words<\/p>/);
+    assert.match(standard.body, /<p>Ada<\/p>/);
+
+    const started = await send(port, "POST", "/session", cookie, { title, author: "" });
+    assert.equal(started.status, 303);
+    const invite = new URL(started.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
+    const session = await send(port, "GET", `/session?invite=${encodeURIComponent(invite)}`, cookie);
+    assert.match(session.body, /Feline/);
+    assert.equal(session.body.includes("Nine As"), false);
+  } finally {
+    if (child.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+  }
+});
