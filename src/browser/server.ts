@@ -52,6 +52,19 @@ function page(main: string): string {
   return fill("document.html", { main }, ["main"]);
 }
 
+function frame(main: string): string {
+  return fill(
+    "frame.html",
+    {
+      menu: fill("menu.html"),
+      masthead: fill("masthead.html"),
+      copyright: fill("copyright.html"),
+      main,
+    },
+    ["menu", "masthead", "copyright", "main"],
+  );
+}
+
 function readCookie(request: IncomingMessage, name: string): string | undefined {
   const header = request.headers.cookie;
   if (!header) return undefined;
@@ -151,7 +164,7 @@ const server = createServer(async (request, response) => {
       send(response, 200, home);
       return;
     }
-    send(response, 200, fill("sign-in.html"));
+    send(response, 200, frame(fill("sign-in.html")));
     return;
   }
 
