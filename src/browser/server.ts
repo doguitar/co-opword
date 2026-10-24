@@ -162,7 +162,7 @@ const server = createServer(async (request, response) => {
       const session = coOpword.openMagicLink(url.searchParams.get("token") ?? "");
       writeSnapshot(statePath, coOpword.snapshot());
       send(response, 303, message("Signed in."), {
-        location: "/",
+        location: session.invite === null ? "/" : `/session?invite=${encodeURIComponent(session.invite)}`,
         "set-cookie": `player=${encodeURIComponent(session.token)}; HttpOnly; Path=/; SameSite=Lax`,
       });
     } catch {
@@ -391,7 +391,15 @@ const server = createServer(async (request, response) => {
       else if (url.pathname === "/session/close") coOpword.closeSession({ token }, invite);
       else coOpword.typeLetter({ token }, invite, body.get("letter") ?? "");
       writeSnapshot(statePath, coOpword.snapshot());
-      const next = url.pathname === "/session/close" ? "/" : sessionPath;
+      let next = url.pathname === "/session/close" ? "/" : sessionPath;
+      if (url.pathname === "/session/letter") {
+        try {
+          coOpword.openSession({ token }, invite);
+        } catch {
+          // typeLetter stays void; a Session it ended no longer opens.
+          next = "/match";
+        }
+      }
       send(response, 303, message("Session"), { location: next });
     } catch {
       send(response, 400, messageLink("That Square did not take the letter.", sessionPath, "Back"));
@@ -421,6 +429,16 @@ const server = createServer(async (request, response) => {
     } catch {
       send(response, 400, message("That did not change the Session."));
     }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/match") {
+    const token = readCookie(request, "player");
+    if (!token || !signedIn({ token })) {
+      send(response, 303, message("Sign in."), { location: "/" });
+      return;
+    }
+    send(response, 200, messageLink("The Grid matched.", "/completions", "Completions"));
     return;
   }
 
