@@ -64,6 +64,31 @@ async function send(port: number, method: string, path: string, cookie: string |
   };
 }
 
+function menuLinks(body: string): string[][] {
+  const menu = body.match(/<summary>Menu<\/summary>\s*<nav>([\s\S]*?)<\/nav>/);
+  assert.ok(menu);
+  return [...menu[1].matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map((match) => [match[1], match[2]]);
+}
+
+function footerLinks(body: string): string[][] {
+  const footer = body.match(/<footer>([\s\S]*?)<\/footer>/);
+  assert.ok(footer);
+  return [...footer[1].matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map((match) => [match[1], match[2]]);
+}
+
+function clueList(body: string, heading: string): string[] {
+  const section = body.match(new RegExp(`<h2>${heading}</h2>\\s*<ul>([\\s\\S]*?)</ul>`));
+  assert.ok(section, heading);
+  return [...section[1].matchAll(/<li>(.*?)<\/li>/g)].map((match) => match[1]);
+}
+
+function playerStatus(body: string): string {
+  const start = body.indexOf("<h2>Player Status</h2>");
+  const end = body.indexOf("<h2>Across</h2>");
+  assert.ok(start !== -1 && end !== -1);
+  return body.slice(start, end);
+}
+
 function rejection(body: string, invite: string): void {
   const href = `/session?invite=${encodeURIComponent(invite)}`;
   assert.match(body, /That Square did not take the letter\./);
@@ -174,6 +199,186 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(decline.body, /That did not change the Session\./);
     const invited = await send(port, "POST", "/session/invite", cookie, { invite: "nope", email: "sam@example.com" });
     assert.match(invited.body, /That did not change the Session\./);
+
+    const libraryUnsigned = await send(port, "GET", "/library", null);
+    const aboutUnsigned = await send(port, "GET", "/about", null);
+    const supportUnsigned = await send(port, "GET", "/support", null);
+    assert.equal(aboutUnsigned.status, libraryUnsigned.status);
+    assert.equal(aboutUnsigned.location, libraryUnsigned.location);
+    assert.equal(aboutUnsigned.body, libraryUnsigned.body);
+    assert.equal(supportUnsigned.status, libraryUnsigned.status);
+    assert.equal(supportUnsigned.location, libraryUnsigned.location);
+    assert.equal(supportUnsigned.body, libraryUnsigned.body);
+
+    const about = await send(port, "GET", "/about", cookie);
+    assert.equal(about.status, 200);
+    assert.match(about.body, /About Us is coming soon\./);
+    assert.equal(about.body.includes("Support is coming soon."), false);
+    assert.equal(about.body.includes("<summary>Menu</summary>"), false);
+    assert.equal(about.body.includes("<footer>"), false);
+    assert.equal(about.body.includes("Game"), false);
+    assert.equal(about.body.includes("<style"), false);
+    assert.deepEqual(
+      [...about.body.matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map((match) => [match[1], match[2]]),
+      [["/", "Home"]],
+    );
+    const support = await send(port, "GET", "/support", cookie);
+    assert.equal(support.status, 200);
+    assert.match(support.body, /Support is coming soon\./);
+    assert.equal(support.body.includes("About Us is coming soon."), false);
+    assert.equal(support.body.includes("<summary>Menu</summary>"), false);
+    assert.equal(support.body.includes("<footer>"), false);
+    assert.equal(support.body.includes("Game"), false);
+    assert.deepEqual(
+      [...support.body.matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map((match) => [match[1], match[2]]),
+      [["/", "Home"]],
+    );
+
+    const signedOut = await send(port, "GET", "/", null);
+    assert.match(signedOut.body, /Email me a magic link/);
+    assert.equal(signedOut.body.includes("<summary>Menu</summary>"), false);
+    for (const path of ["/", "/library", "/publish", "/published", "/completions"]) {
+      const unchanged = await send(port, "GET", path, cookie);
+      assert.equal(unchanged.status, 200);
+      assert.equal(unchanged.body.includes("<summary>Menu</summary>"), false);
+      assert.equal(unchanged.body.includes("About Us"), false);
+      assert.equal(unchanged.body.includes("Game"), false);
+    }
+
+    const first = await send(port, "GET", "/crossword?title=First%20Row", cookie);
+    assert.equal(first.status, 200);
+    assert.match(first.body, /<link rel="stylesheet" href="\/co-opword.css">/);
+    assert.equal(first.body.includes("<style"), false);
+    assert.equal(first.body.includes(" style="), false);
+    assert.equal(first.body.includes("<script"), false);
+    assert.match(first.body, /<h1>First Row<\/h1>/);
+    assert.match(first.body, /<p class="brand">Co-opword<\/p>/);
+    assert.equal(first.body.includes("Author"), false);
+    assert.equal(first.body.includes("Invite"), false);
+    assert.equal(first.body.includes(">Type<"), false);
+    assert.equal(first.body.includes("Offer friendship"), false);
+    assert.equal(first.body.includes("Game"), false);
+    assert.deepEqual(menuLinks(first.body), [
+      ["/", "Home"],
+      ["/library", "Library"],
+      ["/publish", "Publish"],
+      ["/published", "Published"],
+      ["/completions", "Completions"],
+    ]);
+    assert.deepEqual(footerLinks(first.body), [
+      ["/about", "About Us"],
+      ["/support", "Support"],
+      ["/completions", "Completions"],
+    ]);
+    assert.deepEqual(clueList(first.body, "Across"), ["across 9: Nine As"]);
+    assert.deepEqual(clueList(first.body, "Down"), []);
+    assert.equal(first.body.split('<td class="block"></td>').length - 1, 72);
+    assert.equal(first.body.split("<td>A</td>").length - 1, 9);
+    const firstGrid = first.body.indexOf('<table class="grid">');
+    assert.ok(first.body.indexOf("<header>") < first.body.indexOf("<h1>"));
+    assert.ok(firstGrid < first.body.indexOf("Start a Session"));
+    assert.ok(first.body.indexOf("Start a Session") < first.body.indexOf("<h2>Across</h2>"));
+    assert.ok(first.body.indexOf("<h2>Across</h2>") < first.body.indexOf("<footer>"));
+    assert.match(first.body, /<a href="\/library">Library<\/a>/);
+    assert.match(first.body, /<form method="post" action="\/session">/);
+
+    const filled = await send(port, "GET", "/crossword?title=Filled%20Fifteen", cookie);
+    assert.deepEqual(
+      clueList(filled.body, "Across"),
+      Array.from({ length: 15 }, (_, index) => `across 15: Across ${index + 1}`),
+    );
+    assert.deepEqual(
+      clueList(filled.body, "Down"),
+      Array.from({ length: 15 }, (_, index) => `down 15: Down ${index + 1}`),
+    );
+
+    const freshStart = await send(port, "POST", "/session", cookie, { title: "First Row" });
+    const freshInvite = new URL(freshStart.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
+    const live = await send(port, "GET", sessionPath(freshInvite), cookie);
+    assert.match(live.body, /<p class="brand">Co-opword<\/p>/);
+    assert.deepEqual(menuLinks(live.body), menuLinks(first.body));
+    assert.deepEqual(footerLinks(live.body), footerLinks(first.body));
+    assert.match(live.body, new RegExp(`<code>${freshInvite}</code>`));
+    assert.match(live.body, new RegExp(`<a href="/join\\?invite=${encodeURIComponent(freshInvite)}">`));
+    assert.equal(live.body.includes("clipboard"), false);
+    assert.equal(live.body.includes("<script"), false);
+    assert.equal(live.body.includes("Game"), false);
+    assert.equal(live.body.includes("<td>A</td>"), false);
+    assert.equal(playerStatus(live.body).includes("<li>"), false);
+    assert.deepEqual(clueList(live.body, "Across"), ["across 9: Nine As"]);
+    assert.deepEqual(clueList(live.body, "Down"), []);
+    const liveGrid = live.body.indexOf('<table class="grid">');
+    assert.ok(live.body.indexOf("<code>") < liveGrid);
+    assert.ok(liveGrid < live.body.indexOf("<h2>Current Selection</h2>"));
+    assert.ok(live.body.indexOf("<h2>Current Selection</h2>") < live.body.indexOf("<h2>Session Management</h2>"));
+    assert.ok(live.body.indexOf("<h2>Session Management</h2>") < live.body.indexOf("<h2>Player Status</h2>"));
+    assert.ok(live.body.indexOf("<h2>Player Status</h2>") < live.body.indexOf("<h2>Across</h2>"));
+    assert.ok(live.body.indexOf("<h2>Across</h2>") < live.body.indexOf("<footer>"));
+    for (const [label, kind] of [
+      ["Type", "filled"],
+      ["Select", "filled"],
+      ["Invite Player", "filled"],
+      ["Clear", "plain"],
+      ["Close", "plain"],
+      ["Offer friendship", "plain"],
+      ["Decline", "plain"],
+    ]) {
+      const found = live.body.match(new RegExp(`<button[^>]*>${label}</button>`));
+      assert.ok(found, label);
+      assert.match(found[0], new RegExp(`class="${kind}"`));
+    }
+    assert.match(live.body, /formaction="\/session\/select"/);
+    assert.match(live.body, /formaction="\/session\/clear"/);
+    assert.match(live.body, /formaction="\/session\/close"/);
+    assert.match(live.body, /action="\/session\/letter"/);
+    assert.match(live.body, /action="\/session\/invite"/);
+    assert.match(live.body, /action="\/session\/offer"/);
+    assert.match(live.body, /formaction="\/session\/decline"/);
+    assert.match(live.body, /name="displayName"/);
+    assert.match(live.body, /name="email"/);
+    assert.match(live.body, /name="index"/);
+    assert.match(live.body, /name="letter"/);
+
+    const samName = `Sam${Date.now()}`;
+    const samSent = await send(port, "POST", "/sign-in", null, { email: `sam${Date.now()}@example.com` });
+    const samMagic = samSent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
+    const samSigned = await send(port, "GET", samMagic, null);
+    const sam = samSigned.cookie;
+    assert.ok(sam);
+    await send(port, "POST", "/display-name", sam, { displayName: samName });
+    const joined = await send(port, "GET", `/join?invite=${encodeURIComponent(freshInvite)}`, sam);
+    assert.equal(joined.status, 303);
+    await send(port, "POST", "/session/offer", cookie, { invite: freshInvite, displayName: samName });
+    const samLive = await send(port, "GET", sessionPath(freshInvite), sam);
+    assert.match(playerStatus(samLive.body), new RegExp(`<li>${displayName} pending</li>`));
+    const adaLive = await send(port, "GET", sessionPath(freshInvite), cookie);
+    assert.equal(playerStatus(adaLive.body).includes("<li>"), false);
+
+    const publishedTitle = `Page${Date.now()}`;
+    const crossword = {
+      title: publishedTitle,
+      kind: "freestyle",
+      size: 9,
+      squares: Array.from({ length: 81 }, (_, index) => (Math.floor(index / 9) === 0 ? "A" : "#")),
+      words: [{ direction: "across", row: 0, column: 0, answer: "AAAAAAAAA", clue: "Nine As" }],
+    };
+    const publishedPost = await send(port, "POST", "/publish", cookie, { author: displayName, crossword: JSON.stringify(crossword) });
+    assert.equal(publishedPost.status, 200);
+    const published = await send(
+      port,
+      "GET",
+      `/published-crossword?title=${encodeURIComponent(publishedTitle)}&author=${encodeURIComponent(displayName)}`,
+      cookie,
+    );
+    assert.equal(published.status, 200);
+    assert.match(published.body, new RegExp(`<h1>${publishedTitle}</h1>`));
+    assert.match(published.body, new RegExp(`<p>${displayName}</p>`));
+    assert.match(published.body, /<p>1 Words<\/p>/);
+    assert.match(published.body, /Start a Session/);
+    assert.equal(published.body.includes("<summary>Menu</summary>"), false);
+    assert.equal(published.body.includes("About Us"), false);
+    assert.equal(published.body.includes('href="/support"'), false);
+    assert.equal(published.body.includes("Game"), false);
   } finally {
     if (child.exitCode === null) {
       child.kill();

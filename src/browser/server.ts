@@ -85,6 +85,11 @@ function clues(words: { direction: string; length: number; clue: string }[]): st
   return words.map((word) => fill("clue.html", { direction: word.direction, length: String(word.length), clue: word.clue })).join("");
 }
 
+function clueColumns(words: { direction: string; length: number; clue: string }[]): string {
+  const lines = (direction: string) => clues(words.filter((word) => word.direction === direction));
+  return fill("clue-columns.html", { across: lines("across"), down: lines("down") }, ["across", "down"]);
+}
+
 function libraryRows(squares: string[], size: number): string {
   const rows = [];
   for (let row = 0; row < size; row++) {
@@ -196,6 +201,16 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (request.method === "GET" && (url.pathname === "/about" || url.pathname === "/support")) {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 303, message("Sign in."), { location: "/" });
+      return;
+    }
+    send(response, 200, fill(url.pathname === "/about" ? "about.html" : "support.html"));
+    return;
+  }
+
   if (request.method === "GET" && (url.pathname === "/library" || url.pathname === "/crossword")) {
     const token = readCookie(request, "player");
     if (!token) {
@@ -218,8 +233,14 @@ const server = createServer(async (request, response) => {
         200,
         fill(
           "crossword.html",
-          { title: opened.title, rows: libraryRows(opened.squares, opened.size), clues: clues(opened.words) },
-          ["rows", "clues"],
+          {
+            header: fill("header.html"),
+            title: opened.title,
+            rows: libraryRows(opened.squares, opened.size),
+            clues: clueColumns(opened.words),
+            footer: fill("footer.html"),
+          },
+          ["header", "rows", "clues", "footer"],
         ),
       );
     } catch {
@@ -362,21 +383,27 @@ const server = createServer(async (request, response) => {
     try {
       const opened = coOpword.openSession({ token }, invite);
       const link = `/join?invite=${encodeURIComponent(opened.invite)}`;
-      const alerts = coOpword.sessionAlerts({ token }, invite).map((alert) => fill("alert.html", { displayName: alert.displayName ?? "", kind: alert.kind })).join("");
+      const alertItems = coOpword
+        .sessionAlerts({ token }, invite)
+        .map((alert) => fill("alert.html", { displayName: alert.displayName ?? "", kind: alert.kind }))
+        .join("");
+      const alerts = alertItems === "" ? "" : fill("alerts.html", { items: alertItems }, ["items"]);
       send(
         response,
         200,
         fill(
           "session.html",
           {
+            header: fill("header.html"),
             title: opened.title,
             invite: opened.invite,
             link,
             rows: sessionRows(opened.squares, opened.size),
-            clues: clues(opened.words),
+            clues: clueColumns(opened.words),
             alerts,
+            footer: fill("footer.html"),
           },
-          ["rows", "clues", "alerts"],
+          ["header", "rows", "clues", "alerts", "footer"],
         ),
       );
     } catch {

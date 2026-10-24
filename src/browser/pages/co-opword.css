@@ -13,3 +13,110 @@
 .grid td.block {
   background: #111;
 }
+
+.sheet {
+  max-width: 42rem;
+  margin: 0 auto;
+  color: #1a1a1a;
+  background: #fff;
+}
+
+.sheet a {
+  color: #1a1a1a;
+}
+
+.sheet header,
+.sheet footer {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.sheet header {
+  justify-content: space-between;
+  border-bottom: 1px solid #ccc;
+}
+
+.sheet footer {
+  border-top: 1px solid #ccc;
+}
+
+.sheet footer a:last-child {
+  margin-left: auto;
+}
+
+.sheet .brand {
+  margin: 0;
+  font-weight: 700;
+}
+
+.sheet .menu nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+}
+
+.sheet .board {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.sheet .board .grid {
+  width: auto;
+  flex: 1 1 auto;
+}
+
+.sheet .grid td {
+  width: 1.75rem;
+  height: 1.75rem;
+  background: #fff;
+  color: #1a1a1a;
+  border-color: #1a1a1a;
+}
+
+.sheet .grid td.block {
+  background: #111;
+}
+
+.sheet .controls {
+  flex: 0 0 14rem;
+}
+
+.sheet .controls form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.sheet .clues {
+  display: flex;
+  gap: 1rem;
+}
+
+.sheet .clues section {
+  flex: 1 1 0;
+}
+
+.sheet button.filled,
+.sheet button.plain {
+  font: inherit;
+  padding: 0.35rem 0.6rem;
+}
+
+.sheet button.filled {
+  background: #1a1a1a;
+  color: #fff;
+  border: 1px solid #1a1a1a;
+}
+
+.sheet button.plain {
+  background: transparent;
+  color: #1a1a1a;
+  border: 0;
+  padding-left: 0;
+  padding-right: 0;
+}

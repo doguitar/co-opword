@@ -1,26 +1,42 @@
+<div class="sheet">
+{{header}}
 <h1>{{title}}</h1>
 <p>Invite <code>{{invite}}</code> <a href="{{link}}">{{link}}</a></p>
-<table class="grid">{{rows}}</table>
-<ul>{{clues}}</ul>
-<form method="post" action="/session/letter">
-  <input type="hidden" name="invite" value="{{invite}}">
-  <label>Square <input name="index" inputmode="numeric"></label>
-  <label>Letter <input name="letter" maxlength="1"></label>
-  <button type="submit" name="act" value="letter">Type</button>
-  <button type="submit" formaction="/session/select">Select</button>
-  <button type="submit" formaction="/session/clear">Clear</button>
-  <button type="submit" formaction="/session/close">Close</button>
-</form>
-<form method="post" action="/session/invite">
-  <input type="hidden" name="invite" value="{{invite}}">
-  <label>Email <input name="email" type="email" required></label>
-  <button type="submit">Invite into this Session</button>
-</form>
-<form method="post" action="/session/offer">
-  <input type="hidden" name="invite" value="{{invite}}">
-  <label>Player <input name="displayName"></label>
-  <button type="submit">Offer friendship</button>
-  <button type="submit" formaction="/session/decline">Decline</button>
-</form>
-<ul>{{alerts}}</ul>
-<p><a href="/completions">Completions</a></p>
+<div class="board">
+  <table class="grid">{{rows}}</table>
+  <div class="controls">
+    <section>
+      <h2>Current Selection</h2>
+      <form method="post" action="/session/letter">
+        <input type="hidden" name="invite" value="{{invite}}">
+        <label>Square <input name="index" inputmode="numeric"></label>
+        <label>Letter <input name="letter" maxlength="1"></label>
+        <button type="submit" name="act" value="letter" class="filled">Type</button>
+        <button type="submit" class="filled" formaction="/session/select">Select</button>
+        <button type="submit" class="plain" formaction="/session/clear">Clear</button>
+        <button type="submit" class="plain" formaction="/session/close">Close</button>
+      </form>
+    </section>
+    <section>
+      <h2>Session Management</h2>
+      <form method="post" action="/session/invite">
+        <input type="hidden" name="invite" value="{{invite}}">
+        <label>Email <input name="email" type="email" required></label>
+        <button type="submit" class="filled">Invite Player</button>
+      </form>
+    </section>
+    <section>
+      <h2>Player Status</h2>
+      <form method="post" action="/session/offer">
+        <input type="hidden" name="invite" value="{{invite}}">
+        <label>Display name <input name="displayName"></label>
+        <button type="submit" class="plain">Offer friendship</button>
+        <button type="submit" class="plain" formaction="/session/decline">Decline</button>
+      </form>
+      {{alerts}}
+    </section>
+  </div>
+</div>
+{{clues}}
+{{footer}}
+</div>
