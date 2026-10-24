@@ -27,7 +27,7 @@ Start a server that does not write the product snapshot into `data/`. The magic-
 cmd /c "set PORT=3477&& set DATABASE_URL=sqlite::memory:&& npm start"
 ```
 
-From the agent eval kernel, open the omp relay against that server. This uses the user's Chrome through the relay and leaves their other tabs alone:
+From the agent eval kernel, open the omp relay against that server. The screenshot is of that live page. A headless browser does not count. This uses the user's Chrome through the relay and leaves their other tabs alone:
 
 ```python
 tab = await browser.open(
