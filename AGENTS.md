@@ -1,6 +1,6 @@
 ## Coding standards
 
-See `CODING_STANDARDS.md`. Browser, mail, and storage each live in their own module.
+See `CODING_STANDARDS.md`. Browser, mail, and storage each live in their own module. Pages are HTML files, and their styles are CSS files. No style block or `style` attribute belongs in the HTML.
 
 ## Browser check
 

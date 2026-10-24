@@ -1,0 +1,8 @@
+<h1>{{title}}</h1>
+<p>{{author}}</p>
+<p>{{words}} Words</p>
+<form method="post" action="/session">
+  <input type="hidden" name="title" value="{{title}}">
+  <input type="hidden" name="author" value="{{authorValue}}">
+  <button type="submit">Start a Session</button>
+</form>

@@ -7,3 +7,9 @@ Browser, mail, and storage are separate modules. Each adapter lives in its own m
 - **Browser** — HTTP, HTML, and the sign-in cookie.
 - **Mail** — delivering a magic link to an email.
 - **Storage** — reading and writing the product snapshot.
+
+## Pages
+
+HTML lives in HTML files. The browser module serves those files. It does not assemble a page as a string of markup in TypeScript or any other module.
+
+CSS lives in CSS files. A stylesheet that a compiler writes is fine. The HTML does not contain CSS: no `<style>` element, no `style` attribute, and no stylesheet text pasted into a template. Link the CSS file from the HTML file.

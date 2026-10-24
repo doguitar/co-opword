@@ -1,0 +1,15 @@
+.grid {
+  width: 100%;
+  max-width: 36rem;
+  border-collapse: collapse;
+}
+
+.grid td {
+  border: 1px solid;
+  height: 2rem;
+  text-align: center;
+}
+
+.grid td.block {
+  background: #111;
+}
