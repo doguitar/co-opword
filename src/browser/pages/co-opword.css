@@ -126,10 +126,17 @@
   padding-right: 0;
 }
 
+body:has(.spread) {
+  margin: 0;
+  background: #fff;
+  color: #111;
+}
+
 .spread {
   position: relative;
   min-height: 100vh;
-  background: #f4f0e6;
+  min-height: 100dvh;
+  background: #fff;
   color: #111;
   font-family: Georgia, "Times New Roman", serif;
 }
@@ -138,51 +145,84 @@
   position: relative;
   z-index: 1;
   box-sizing: border-box;
-  width: 50%;
+  width: 100%;
   min-height: 100vh;
-  padding: 1.5rem 2rem 2rem;
-  background: #fffef8;
-  box-shadow: 10px 0 0 #e4ddd0, 18px 0 28px rgba(0, 0, 0, 0.18);
+  min-height: 100dvh;
+  padding: 1.5rem 2rem 5.5rem;
+  background: #fff;
+  transition: width 0.35s ease;
 }
 
-.spread .leaf::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: -3rem;
-  width: 3rem;
-  height: 100%;
-  background: linear-gradient(90deg, #fffef8 0%, #c9c0ae 100%);
-  clip-path: polygon(0 0, 100% 6%, 35% 50%, 100% 94%, 0 100%);
-  pointer-events: none;
+.spread:has(.page-turn:checked) .leaf {
+  width: 50%;
+  border-right: 1px solid #111;
+}
+
+.spread .leaf > header,
+.spread main,
+.spread .leaf > footer {
+  width: 100%;
+  max-width: 44rem;
+}
+
+.spread .leaf > header {
+  margin-bottom: 1.25rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid #111;
 }
 
 .spread .brand {
-  margin: 0 0 0.75rem;
-  padding-bottom: 0.4rem;
+  margin: 0;
+  padding-bottom: 0.35rem;
   border-bottom: 3px solid #111;
-  font-size: 2.4rem;
+  font-size: 2.6rem;
   font-weight: 700;
-  letter-spacing: 0.03em;
-}
-
-.spread main {
-  max-width: 22rem;
+  letter-spacing: 0.02em;
+  line-height: 1.05;
 }
 
 .spread form {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.75rem;
+  gap: 1rem;
+  font-size: clamp(1rem, 1.5vw, 1.5rem);
 }
 
-.spread footer p {
-  margin: 2rem 0 0;
+.spread form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.spread input {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  color: #111;
+  background: #fff;
+  border: 1px solid #111;
+  border-radius: 0;
+  padding: 0.35rem 0.45rem;
+}
+
+.spread button.filled {
+  width: 100%;
+  color: #111;
+  background: #ccc;
+  border-color: #111;
+  font-size: clamp(1rem, 1.5vw, 1.5rem);
+}
+
+.spread .leaf > footer p {
+  margin: 1.5rem 0 0;
+  color: #555;
 }
 
 .spread .menu {
   position: absolute;
+  z-index: 0;
   top: 0;
   right: 0;
   bottom: 0;
@@ -194,6 +234,13 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 0.7rem;
+  visibility: hidden;
+  transition: visibility 0s linear 0.35s;
+}
+
+.spread:has(.page-turn:checked) .menu {
+  visibility: visible;
+  transition-delay: 0s;
 }
 
 .spread .menu a {
@@ -202,20 +249,84 @@
   border-bottom: 1px solid #111;
 }
 
+.curl {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  width: 4.5rem;
+  height: 4.5rem;
+  margin: 0;
+  cursor: pointer;
+}
+
+.curl::before,
+.curl::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4.5rem;
+  height: 4.5rem;
+  pointer-events: none;
+}
+
+.curl::before {
+  background: #c8c8c8;
+  clip-path: polygon(100% 0, 0 100%, 100% 100%);
+}
+
+.curl::after {
+  background: #eee;
+  clip-path: polygon(100% 0, 58% 58%, 100% 100%);
+}
+
+.curl .page-turn {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.curl .page-turn:focus-visible {
+  outline: 2px solid #111;
+  outline-offset: -3px;
+}
+
 @media (max-width: 720px) {
   .spread .leaf {
-    width: auto;
-    min-height: 0;
-    box-shadow: none;
+    padding: 1.25rem 1.25rem 5.5rem;
   }
 
-  .spread .leaf::after {
-    display: none;
+  .spread .brand {
+    font-size: 2.15rem;
+  }
+
+  .spread:has(.page-turn:checked) .leaf {
+    width: 100%;
+    min-height: 0;
+    border-right: 0;
   }
 
   .spread .menu {
-    position: static;
+    left: 0;
     width: auto;
-    padding: 0 2rem 2rem;
+    height: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .spread:has(.page-turn:checked) .menu {
+    position: static;
+    height: auto;
+    overflow: visible;
+    padding: 0.25rem 1.25rem 1.5rem;
   }
 }
