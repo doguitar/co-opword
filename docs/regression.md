@@ -11,19 +11,51 @@ npm test
 npm run typecheck
 ```
 
-`npm test` runs `src/product/coopword.test.ts` and `src/browser/server.test.ts`. Both commands must finish with no failures. A product test is not a substitute for the browser pass below.
+`npm test` runs the product, browser, and snapshot-store tests named in `package.json`. Both commands must finish with no failures. A product test is not a substitute for the browser pass below.
 
 ## Browser screenshots
 
-Start a clean server so the shots are not mixed with a previous snapshot:
+The PNGs in `regression/` are the baseline captured through the omp browser relay. Replace a file when that page changes. Do not add a date or a suffix. Commit the new PNG with the change that altered the page.
+
+### Capture
+
+Start a server that does not write the product snapshot into `data/`. The magic-link outbox is still appended under `data/`; do not commit that file.
 
 ```
-npm start
+cmd /c "set PORT=3477&& set DATABASE_URL=sqlite::memory:&& npm start"
 ```
 
-The server listens on `http://localhost:3000` unless `PORT` is set. Sign in with a new email. The magic link is appended to `data/magic-link-outbox.jsonl` as `/magic?token=...`. Open that path in the same browser, set a display name, then open each page below.
+From the agent eval kernel, open the omp relay against that server. This uses the user's Chrome through the relay and leaves their other tabs alone:
 
-Save a full-page PNG under `regression/`, using the name in the table. Replace the previous file for that page. Do not add a date or a suffix. Commit the PNGs with the change that altered the page.
+```python
+tab = await browser.open(
+    name="coopword",
+    url="http://127.0.0.1:3477/",
+    app={"relay": True},
+    persist=True,
+)
+```
+
+A full-page shot is a PNG path. Copy it onto the name in the table:
+
+```python
+shot = await tab.screenshot(fullPage=True, format="png")
+shutil.copyfile(shot, "regression/sign-in.png")
+```
+
+`tab.waitFor(300)` is not a delay. The number is read as a selector. Use `asyncio.sleep` between submits.
+
+Sign in before any other shot. Fill the email, submit, and open the last `/magic?token=...` line in `data/magic-link-outbox.jsonl`. Set the display name to Relay. That Home page is `home.png`.
+
+Then, in order:
+
+1. Library, then Crossword `First Row`. Save `crossword.png` before starting the Session.
+2. Start the Session and save `session.png` while the top row is still empty.
+3. Match the Grid. Select sets the Square from the index field. Type writes the letter onto that selected Square, not onto the index. For squares 0 through 8, Select, then Type `A`. The last Type opens `/match`.
+4. Completions, then Publish. Publish the same nine-A Freestyle Crossword as title Tiny and Author Ada. Open Published, then that Published Crossword.
+5. About, then Support.
+
+Close the relay tab with `browser.close(name="coopword")`. The memory server holds no snapshot file.
 
 | Page | Path | File |
 | --- | --- | --- |
@@ -37,6 +69,8 @@ Save a full-page PNG under `regression/`, using the name in the table. Replace t
 | Session | `/session?invite=` for a live Session | `regression/session.png` |
 | Match | `/match` after the Grid has matched | `regression/match.png` |
 | Completions | `/completions` | `regression/completions.png` |
+| About | `/about` | `regression/about.png` |
+| Support | `/support` | `regression/support.png` |
 
 Fragments (`cell.html`, `clue.html`, `row.html`, and the other partials) are not pages. They show up inside the screenshots above.
 
