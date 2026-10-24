@@ -15,7 +15,9 @@ npm run typecheck
 
 ## Browser screenshots
 
-The PNGs in `regression/` are the baseline captured through the omp browser relay. Replace a file when that page changes. Do not add a date or a suffix. Commit the new PNG with the change that altered the page.
+The PNGs in `regression/` are the baseline captured through the omp browser relay.
+
+Any change to a UI element requires a new screenshot of every page that shows that element. Replace the file for that page. Do not add a date or a suffix. Commit the new PNG with the change. A UI change without the new screenshot is not done.
 
 ### Capture
 
