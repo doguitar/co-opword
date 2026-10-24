@@ -294,12 +294,18 @@ const server = createServer(async (request, response) => {
       send(
         response,
         200,
-        fill("published-crossword.html", {
-          title: opened.title,
-          author: opened.author === "" ? "no Author" : opened.author,
-          authorValue: opened.author,
-          words: String(opened.words.length),
-        }),
+        fill(
+          "published-crossword.html",
+          {
+            title: opened.title,
+            author: opened.author === "" ? "no Author" : opened.author,
+            authorValue: opened.author,
+            words: String(opened.words.length),
+            rows: libraryRows(opened.squares, opened.size),
+            clues: clues(opened.words),
+          },
+          ["rows", "clues"],
+        ),
       );
     } catch {
       send(response, 404, message("That Crossword is not published."));
