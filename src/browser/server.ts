@@ -146,6 +146,7 @@ function sessionRows(
   numbers: Map<number, string>,
   players: { displayName: string | null }[],
   myIndex: number,
+  rejected: number,
 ): string {
   const rows = [];
   for (let row = 0; row < size; row++) {
@@ -157,6 +158,7 @@ function sessionRows(
         if (playerIndex < 0) return [];
         return playerIndex === myIndex ? ["selected", inkClass(playerIndex)] : [`guest-${inkClass(playerIndex)}`];
       });
+      if (index === rejected) shade.push("reject");
       return fill("controls/cell-session.html", {
         shade: shade.join(" "),
         index: String(index),
@@ -175,6 +177,7 @@ function sessionClues(
   selected: number,
   mark: string,
 ): string {
+  const numbers = clueStarts(words, size);
   const ordered = [...words].sort((left, right) => Number(wordCovers(right, selected, size)) - Number(wordCovers(left, selected, size)));
   const lines = (direction: string) =>
     ordered
@@ -182,8 +185,7 @@ function sessionClues(
       .map((word) =>
         fill("controls/session-clue.html", {
           mark: selected >= 0 && wordCovers(word, selected, size) ? mark : "",
-          direction: word.direction,
-          length: String(word.length),
+          number: numbers.get(word.row * size + word.column) ?? "",
           clue: word.clue,
         }),
       )
@@ -472,6 +474,8 @@ const server = createServer(async (request, response) => {
       const me = coOpword.whoAmI({ token });
       const myIndex = opened.players.findIndex((player) => player.displayName === me.displayName);
       const selected = opened.squares.findIndex((square) => myIndex >= 0 && square.present.includes(me.displayName ?? ""));
+      const rejectedParam = url.searchParams.get("reject");
+      const rejected = rejectedParam === null || rejectedParam === "" ? -1 : Number(rejectedParam);
       const players = opened.players
         .filter((player) => player.displayName !== null && player.displayName !== me.displayName)
         .map((player) => fill("controls/player.html", { displayName: player.displayName ?? "" }))
@@ -486,7 +490,7 @@ const server = createServer(async (request, response) => {
               title: opened.title,
               invite: opened.invite,
               link,
-              puzzle: fill("controls/puzzle.html", { rows: sessionRows(opened.squares, opened.size, clueStarts(opened.words, opened.size), opened.players, myIndex) }, ["rows"]),
+              puzzle: fill("controls/puzzle.html", { rows: sessionRows(opened.squares, opened.size, clueStarts(opened.words, opened.size), opened.players, myIndex, rejected) }, ["rows"]),
               clues: sessionClues(opened.words, opened.size, selected, myIndex < 0 ? "" : `lit ${inkClass(myIndex)}`),
               management: fill("controls/session-management.html", { invite: opened.invite }),
               playersSection: fill("controls/player-status.html", { invite: opened.invite, players, alerts }, ["players", "alerts"]),
@@ -529,6 +533,19 @@ const server = createServer(async (request, response) => {
       }
       send(response, 303, message("Session"), { location: next });
     } catch {
+      if (url.pathname === "/session/letter") {
+        try {
+          const opened = coOpword.openSession({ token }, invite);
+          const me = coOpword.whoAmI({ token });
+          const at = opened.squares.findIndex((square) => square.present.includes(me.displayName ?? ""));
+          if (at >= 0) {
+            send(response, 303, message("Session"), { location: `${sessionPath}&reject=${at}` });
+            return;
+          }
+        } catch {
+          // The Session cannot be opened, so the letter error page still applies.
+        }
+      }
       send(response, 400, messageLink("That Square did not take the letter.", sessionPath, "Back"));
     }
     return;

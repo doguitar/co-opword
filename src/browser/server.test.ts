@@ -138,9 +138,11 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(locked.body.includes("That Square did not take the letter."), false);
 
     const rejected = await send(port, "POST", "/session/letter", cookie, { invite, index: "0", letter: "C" });
-    assert.equal(rejected.status, 400);
-    assert.equal(rejected.location, null);
-    rejection(rejected.body, invite);
+    assert.equal(rejected.status, 303);
+    assert.equal(rejected.location, `${sessionPath(invite)}&reject=0`);
+    const flashed = await send(port, "GET", rejected.location ?? "", cookie);
+    assert.match(flashed.body, /<td class="selected ink-0 reject">[\s\S]*?<span class="letter">B<\/span>/);
+    assert.equal(flashed.body.includes("That Square did not take the letter."), false);
     const back = await send(port, "GET", sessionPath(invite), cookie);
     assert.match(back.body, /<td class="selected ink-0">[\s\S]*?<span class="letter">B<\/span>/);
     assert.equal(back.body.includes("That Square did not take the letter."), false);
@@ -150,11 +152,11 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(next.status, 303);
     await send(port, "POST", "/session/letter", cookie, { invite, index: "1", letter: "A" });
     const same = await send(port, "POST", "/session/letter", cookie, { invite, index: "1", letter: "A" });
-    assert.equal(same.status, 400);
-    rejection(same.body, invite);
+    assert.equal(same.status, 303);
+    assert.equal(same.location, `${sessionPath(invite)}&reject=1`);
     const notLetter = await send(port, "POST", "/session/letter", cookie, { invite, index: "1", letter: "!" });
-    assert.equal(notLetter.status, 400);
-    rejection(notLetter.body, invite);
+    assert.equal(notLetter.status, 303);
+    assert.equal(notLetter.location, `${sessionPath(invite)}&reject=1`);
     const kept = await send(port, "GET", sessionPath(invite), cookie);
     assert.match(kept.body, /<span class="letter">B<\/span>/);
     assert.match(kept.body, /<td class="selected ink-0">[\s\S]*?<span class="letter">A<\/span>/);
@@ -307,7 +309,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(live.body.includes("Game"), false);
     assert.equal(live.body.includes("<td>A</td>"), false);
     assert.equal(playerStatus(live.body).includes("<li>"), false);
-    assert.deepEqual(clueList(live.body, "Across"), ["across 9: Nine As"]);
+    assert.deepEqual(clueList(live.body, "Across"), ["1. Nine As"]);
     assert.deepEqual(clueList(live.body, "Down"), []);
     const liveGrid = live.body.indexOf('<table class="grid">');
     assert.ok(live.body.indexOf("<code>") < liveGrid);
