@@ -2,6 +2,33 @@ document.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+  if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") {
+    const selected = document.querySelector(".grid td.selected button");
+    const grid = document.querySelector(".grid");
+    const width = grid?.querySelector("tr")?.children.length ?? 0;
+    if (!(selected instanceof HTMLButtonElement) || width === 0) return;
+    const cells = [...grid.querySelectorAll("td")];
+    const start = Number(selected.value);
+    const across = event.key === "ArrowLeft" || event.key === "ArrowRight";
+    const step = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+    let cursor = start;
+    event.preventDefault();
+    while (true) {
+      if (across) {
+        const row = Math.floor(cursor / width);
+        cursor += step;
+        if (cursor < row * width || cursor >= (row + 1) * width) return;
+      } else {
+        cursor += step * width;
+        if (cursor < 0 || cursor >= cells.length) return;
+      }
+      const button = cells[cursor]?.querySelector("button");
+      if (button instanceof HTMLButtonElement) {
+        button.click();
+        return;
+      }
+    }
+  }
   if (event.key === "Backspace" || event.key === "Delete") {
     const clear = document.getElementById("clear-square");
     const index = clear?.querySelector("[name=index]");
@@ -18,3 +45,6 @@ document.addEventListener("keydown", (event) => {
   letter.value = event.key;
   form.requestSubmit();
 });
+
+
+[You have received this identical output 3 times. Re-reading 'C:\Users\seanseymour\source\repos\coopword\src\browser\pages\session.js:raw' will not change it — use a narrower selector (path:A-B), or proceed with the edit.]
