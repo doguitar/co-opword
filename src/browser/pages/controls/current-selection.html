@@ -1,0 +1,12 @@
+<section>
+  <h2>Current Selection</h2>
+  <form method="post" action="/session/letter">
+    <input type="hidden" name="invite" value="{{invite}}">
+    <label>Square <input name="index" inputmode="numeric"></label>
+    <label>Letter <input name="letter" maxlength="1"></label>
+    <button type="submit" name="act" value="letter" class="filled">Type</button>
+    <button type="submit" class="filled" formaction="/session/select">Select</button>
+    <button type="submit" class="plain" formaction="/session/clear">Clear</button>
+    <button type="submit" class="plain" formaction="/session/close">Close</button>
+  </form>
+</section>

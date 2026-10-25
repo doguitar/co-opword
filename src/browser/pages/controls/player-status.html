@@ -1,0 +1,11 @@
+<section class="player-status">
+  <h2>Player Status</h2>
+  <ul>{{players}}</ul>
+  <form method="post" action="/session/offer">
+    <input type="hidden" name="invite" value="{{invite}}">
+    <label>Display name <input name="displayName"></label>
+    <button type="submit" class="plain">Offer friendship</button>
+    <button type="submit" class="plain" formaction="/session/decline">Decline</button>
+  </form>
+  {{alerts}}
+</section>

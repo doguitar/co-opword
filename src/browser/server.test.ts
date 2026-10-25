@@ -83,8 +83,8 @@ function clueList(body: string, heading: string): string[] {
 }
 
 function playerStatus(body: string): string {
-  const start = body.indexOf("<h2>Player Status</h2>");
-  const end = body.indexOf("<h2>Across</h2>");
+  const start = body.indexOf('<section class="player-status">');
+  const end = body.indexOf("</section>", start);
   assert.ok(start !== -1 && end !== -1);
   return body.slice(start, end);
 }
@@ -296,8 +296,9 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     const freshInvite = new URL(freshStart.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
     const live = await send(port, "GET", sessionPath(freshInvite), cookie);
     assert.match(live.body, /<p class="brand">Co-opword<\/p>/);
-    assert.deepEqual(menuLinks(live.body), menuLinks(first.body));
-    assert.deepEqual(footerLinks(live.body), footerLinks(first.body));
+    assert.match(live.body, /\(C\) Co-opword/);
+    assert.match(live.body, /class="page-turn"/);
+    assert.equal(live.body.includes("<summary>Menu</summary>"), false);
     assert.match(live.body, new RegExp(`<code>${freshInvite}</code>`));
     assert.match(live.body, new RegExp(`<a href="/join\\?invite=${encodeURIComponent(freshInvite)}">`));
     assert.equal(live.body.includes("clipboard"), false);
@@ -309,11 +310,11 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.deepEqual(clueList(live.body, "Down"), []);
     const liveGrid = live.body.indexOf('<table class="grid">');
     assert.ok(live.body.indexOf("<code>") < liveGrid);
-    assert.ok(liveGrid < live.body.indexOf("<h2>Current Selection</h2>"));
+    assert.ok(liveGrid < live.body.indexOf("<h2>Across</h2>"));
+    assert.ok(live.body.indexOf("<h2>Across</h2>") < live.body.indexOf("<h2>Current Selection</h2>"));
     assert.ok(live.body.indexOf("<h2>Current Selection</h2>") < live.body.indexOf("<h2>Session Management</h2>"));
     assert.ok(live.body.indexOf("<h2>Session Management</h2>") < live.body.indexOf("<h2>Player Status</h2>"));
-    assert.ok(live.body.indexOf("<h2>Player Status</h2>") < live.body.indexOf("<h2>Across</h2>"));
-    assert.ok(live.body.indexOf("<h2>Across</h2>") < live.body.indexOf("<footer>"));
+    assert.ok(live.body.indexOf("<h2>Player Status</h2>") < live.body.indexOf("<footer>"));
     for (const [label, kind] of [
       ["Type", "filled"],
       ["Select", "filled"],
@@ -352,7 +353,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     const samLive = await send(port, "GET", sessionPath(freshInvite), sam);
     assert.match(playerStatus(samLive.body), new RegExp(`<li>${displayName} pending</li>`));
     const adaLive = await send(port, "GET", sessionPath(freshInvite), cookie);
-    assert.equal(playerStatus(adaLive.body).includes("<li>"), false);
+    assert.match(playerStatus(adaLive.body), new RegExp(`<li>${samName}</li>`));
 
     const publishedTitle = `Page${Date.now()}`;
     const crossword = {

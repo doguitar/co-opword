@@ -54,11 +54,11 @@ function page(main: string): string {
 
 function frame(main: string): string {
   return fill(
-    "frame.html",
+    "controls/frame.html",
     {
-      menu: fill("menu.html"),
-      masthead: fill("masthead.html"),
-      copyright: fill("copyright.html"),
+      menu: fill("controls/menu.html"),
+      masthead: fill("controls/masthead.html"),
+      copyright: fill("controls/copyright.html"),
       main,
     },
     ["menu", "masthead", "copyright", "main"],
@@ -95,22 +95,22 @@ function messageLink(text: string, href: string, label: string): string {
 }
 
 function clues(words: { direction: string; length: number; clue: string }[]): string {
-  return words.map((word) => fill("clue.html", { direction: word.direction, length: String(word.length), clue: word.clue })).join("");
+  return words.map((word) => fill("controls/clue.html", { direction: word.direction, length: String(word.length), clue: word.clue })).join("");
 }
 
 function clueColumns(words: { direction: string; length: number; clue: string }[]): string {
   const lines = (direction: string) => clues(words.filter((word) => word.direction === direction));
-  return fill("clue-columns.html", { across: lines("across"), down: lines("down") }, ["across", "down"]);
+  return fill("controls/clue-columns.html", { across: lines("across"), down: lines("down") }, ["across", "down"]);
 }
 
 function libraryRows(squares: string[], size: number): string {
   const rows = [];
   for (let row = 0; row < size; row++) {
     const cells = squares.slice(row * size, (row + 1) * size).map((square) => {
-      if (square === "#") return fill("cell-block.html");
-      return fill("cell.html", { letter: square });
+      if (square === "#") return fill("controls/cell-block.html");
+      return fill("controls/cell.html", { letter: square });
     });
-    rows.push(fill("row.html", { cells: cells.join("") }, ["cells"]));
+    rows.push(fill("controls/row.html", { cells: cells.join("") }, ["cells"]));
   }
   return rows.join("");
 }
@@ -119,12 +119,12 @@ function sessionRows(squares: { letter: string | null; present: string[]; block:
   const rows = [];
   for (let row = 0; row < size; row++) {
     const cells = squares.slice(row * size, (row + 1) * size).map((square) => {
-      if (square.block) return fill("cell-block.html");
+      if (square.block) return fill("controls/cell-block.html");
       const names = square.present.filter((name) => name !== "").join(", ");
-      if (names === "") return fill("cell.html", { letter: square.letter ?? "" });
-      return fill("cell-present.html", { letter: square.letter ?? "", names });
+      if (names === "") return fill("controls/cell.html", { letter: square.letter ?? "" });
+      return fill("controls/cell-present.html", { letter: square.letter ?? "", names });
     });
-    rows.push(fill("row.html", { cells: cells.join("") }, ["cells"]));
+    rows.push(fill("controls/row.html", { cells: cells.join("") }, ["cells"]));
   }
   return rows.join("");
 }
@@ -132,7 +132,7 @@ function sessionRows(squares: { letter: string | null; present: string[]; block:
 function signedIn(session: PlayerSession): string | undefined {
   try {
     const me = coOpword.whoAmI(session);
-    const players = coOpword.playersOthersSee(session).map((player) => fill("player.html", { displayName: player.displayName })).join("");
+    const players = coOpword.playersOthersSee(session).map((player) => fill("controls/player.html", { displayName: player.displayName })).join("");
     return fill(
       "home.html",
       {
@@ -235,7 +235,7 @@ const server = createServer(async (request, response) => {
       if (url.pathname === "/library") {
         const items = coOpword
           .library(session)
-          .map((crossword) => fill("library-item.html", { href: `/crossword?title=${encodeURIComponent(crossword.title)}`, title: crossword.title }))
+          .map((crossword) => fill("controls/library-item.html", { href: `/crossword?title=${encodeURIComponent(crossword.title)}`, title: crossword.title }))
           .join("");
         send(response, 200, fill("library.html", { items }, ["items"]));
         return;
@@ -247,11 +247,11 @@ const server = createServer(async (request, response) => {
         fill(
           "crossword.html",
           {
-            header: fill("header.html"),
+            header: fill("controls/header.html"),
             title: opened.title,
             rows: libraryRows(opened.squares, opened.size),
             clues: clueColumns(opened.words),
-            footer: fill("footer.html"),
+            footer: fill("controls/footer.html"),
           },
           ["header", "rows", "clues", "footer"],
         ),
@@ -314,7 +314,7 @@ const server = createServer(async (request, response) => {
       .published({ token })
       .map((crossword) => {
         const href = `/published-crossword?title=${encodeURIComponent(crossword.title)}&author=${encodeURIComponent(crossword.author)}`;
-        return fill("published-item.html", { href, title: crossword.title, author: crossword.author === "" ? "no Author" : crossword.author });
+        return fill("controls/published-item.html", { href, title: crossword.title, author: crossword.author === "" ? "no Author" : crossword.author });
       })
       .join("");
     send(response, 200, fill("published.html", { items }, ["items"]));
@@ -398,25 +398,32 @@ const server = createServer(async (request, response) => {
       const link = `/join?invite=${encodeURIComponent(opened.invite)}`;
       const alertItems = coOpword
         .sessionAlerts({ token }, invite)
-        .map((alert) => fill("alert.html", { displayName: alert.displayName ?? "", kind: alert.kind }))
+        .map((alert) => fill("controls/alert.html", { displayName: alert.displayName ?? "", kind: alert.kind }))
         .join("");
-      const alerts = alertItems === "" ? "" : fill("alerts.html", { items: alertItems }, ["items"]);
+      const alerts = alertItems === "" ? "" : fill("controls/alerts.html", { items: alertItems }, ["items"]);
+      const me = coOpword.whoAmI({ token });
+      const players = opened.players
+        .filter((player) => player.displayName !== null && player.displayName !== me.displayName)
+        .map((player) => fill("controls/player.html", { displayName: player.displayName ?? "" }))
+        .join("");
       send(
         response,
         200,
-        fill(
-          "session.html",
-          {
-            header: fill("header.html"),
-            title: opened.title,
-            invite: opened.invite,
-            link,
-            rows: sessionRows(opened.squares, opened.size),
-            clues: clueColumns(opened.words),
-            alerts,
-            footer: fill("footer.html"),
-          },
-          ["header", "rows", "clues", "alerts", "footer"],
+        frame(
+          fill(
+            "session.html",
+            {
+              title: opened.title,
+              invite: opened.invite,
+              link,
+              puzzle: fill("controls/puzzle.html", { rows: sessionRows(opened.squares, opened.size) }, ["rows"]),
+              clues: clueColumns(opened.words),
+              current: fill("controls/current-selection.html", { invite: opened.invite }),
+              management: fill("controls/session-management.html", { invite: opened.invite }),
+              playersSection: fill("controls/player-status.html", { invite: opened.invite, players, alerts }, ["players", "alerts"]),
+            },
+            ["puzzle", "clues", "current", "management", "playersSection"],
+          ),
         ),
       );
     } catch {
@@ -501,9 +508,9 @@ const server = createServer(async (request, response) => {
     const items = coOpword
       .completions({ token })
       .map((completion) => {
-        const roster = completion.roster.map((entry) => fill("roster.html", { displayName: entry.displayName ?? "", letters: String(entry.letters) })).join("");
+        const roster = completion.roster.map((entry) => fill("controls/roster.html", { displayName: entry.displayName ?? "", letters: String(entry.letters) })).join("");
         return fill(
-          "completion.html",
+          "controls/completion.html",
           { title: completion.title, author: completion.author === null ? "no Author" : completion.author, duration: String(completion.duration), roster },
           ["roster"],
         );
