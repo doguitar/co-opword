@@ -164,6 +164,7 @@ function sessionRows(
         index: String(index),
         number: numbers.get(index) ?? "",
         letter: square.letter ?? "",
+        focus: shade.includes("selected") ? "autofocus" : "",
       });
     });
     rows.push(fill("controls/row.html", { cells: cells.join("") }, ["cells"]));
@@ -222,7 +223,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/session.js") {
-    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
     response.end(readFileSync(join(pagesDir, "session.js")));
     return;
   }

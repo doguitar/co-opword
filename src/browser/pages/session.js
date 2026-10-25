@@ -45,6 +45,3 @@ document.addEventListener("keydown", (event) => {
   letter.value = event.key;
   form.requestSubmit();
 });
-
-
-[You have received this identical output 3 times. Re-reading 'C:\Users\seanseymour\source\repos\coopword\src\browser\pages\session.js:raw' will not change it — use a narrower selector (path:A-B), or proceed with the edit.]

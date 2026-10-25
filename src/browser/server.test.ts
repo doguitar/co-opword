@@ -305,7 +305,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(live.body, new RegExp(`<code>${freshInvite}</code>`));
     assert.match(live.body, new RegExp(`<a href="/join\\?invite=${encodeURIComponent(freshInvite)}">`));
     assert.equal(live.body.includes("clipboard"), false);
-    assert.equal(live.body.replace('<script src="/session.js"></script>', "").includes("<script"), false);
+    assert.equal(live.body.replace('<script src="/session.js?v=4"></script>', "").includes("<script"), false);
     assert.equal(live.body.includes("Game"), false);
     assert.equal(live.body.includes("<td>A</td>"), false);
     assert.equal(playerStatus(live.body).includes("<li>"), false);
