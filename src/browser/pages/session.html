@@ -1,5 +1,16 @@
 <h1>{{title}}</h1>
 <p>Invite <code>{{invite}}</code> <a href="{{link}}">{{link}}</a></p>
+<form id="select-square" method="post" action="/session/select">
+  <input type="hidden" name="invite" value="{{invite}}">
+</form>
+<form id="type-letter" method="post" action="/session/letter">
+  <input type="hidden" name="invite" value="{{invite}}">
+  <input type="hidden" name="letter" value="">
+</form>
+<form id="clear-square" method="post" action="/session/clear">
+  <input type="hidden" name="invite" value="{{invite}}">
+  <input type="hidden" name="index" value="{{selected}}">
+</form>
 <div class="session">
   <div class="session-column">
     {{puzzle}}
@@ -7,7 +18,7 @@
   </div>
   <div class="session-column">
     {{clues}}
-    {{current}}
     {{management}}
   </div>
 </div>
+<script src="/session.js"></script>

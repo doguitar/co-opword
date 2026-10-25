@@ -115,18 +115,80 @@ function libraryRows(squares: string[], size: number): string {
   return rows.join("");
 }
 
-function sessionRows(squares: { letter: string | null; present: string[]; block: boolean }[], size: number): string {
+const inkCount = 6;
+
+function inkClass(index: number): string {
+  return `ink-${((index % inkCount) + inkCount) % inkCount}`;
+}
+
+function clueStarts(words: { direction: string; row: number; column: number }[], size: number): Map<number, string> {
+  const starts = new Set(words.map((word) => word.row * size + word.column));
+  const numbers = new Map<number, string>();
+  let number = 0;
+  for (let index = 0; index < size * size; index++) {
+    if (!starts.has(index)) continue;
+    number += 1;
+    numbers.set(index, String(number));
+  }
+  return numbers;
+}
+
+function wordCovers(word: { direction: string; row: number; column: number; length: number }, index: number, size: number): boolean {
+  const row = Math.floor(index / size);
+  const column = index % size;
+  if (word.direction === "across") return word.row === row && column >= word.column && column < word.column + word.length;
+  return word.column === column && row >= word.row && row < word.row + word.length;
+}
+
+function sessionRows(
+  squares: { letter: string | null; present: string[]; block: boolean }[],
+  size: number,
+  numbers: Map<number, string>,
+  players: { displayName: string | null }[],
+  myIndex: number,
+): string {
   const rows = [];
   for (let row = 0; row < size; row++) {
-    const cells = squares.slice(row * size, (row + 1) * size).map((square) => {
+    const cells = squares.slice(row * size, (row + 1) * size).map((square, column) => {
       if (square.block) return fill("controls/cell-block.html");
-      const names = square.present.filter((name) => name !== "").join(", ");
-      if (names === "") return fill("controls/cell.html", { letter: square.letter ?? "" });
-      return fill("controls/cell-present.html", { letter: square.letter ?? "", names });
+      const index = row * size + column;
+      const shade = square.present.flatMap((name) => {
+        const playerIndex = players.findIndex((player) => (player.displayName ?? "") === name);
+        if (playerIndex < 0) return [];
+        return playerIndex === myIndex ? ["selected", inkClass(playerIndex)] : [`guest-${inkClass(playerIndex)}`];
+      });
+      return fill("controls/cell-session.html", {
+        shade: shade.join(" "),
+        index: String(index),
+        number: numbers.get(index) ?? "",
+        letter: square.letter ?? "",
+      });
     });
     rows.push(fill("controls/row.html", { cells: cells.join("") }, ["cells"]));
   }
   return rows.join("");
+}
+
+function sessionClues(
+  words: { direction: string; row: number; column: number; length: number; clue: string }[],
+  size: number,
+  selected: number,
+  mark: string,
+): string {
+  const ordered = [...words].sort((left, right) => Number(wordCovers(right, selected, size)) - Number(wordCovers(left, selected, size)));
+  const lines = (direction: string) =>
+    ordered
+      .filter((word) => word.direction === direction)
+      .map((word) =>
+        fill("controls/session-clue.html", {
+          mark: selected >= 0 && wordCovers(word, selected, size) ? mark : "",
+          direction: word.direction,
+          length: String(word.length),
+          clue: word.clue,
+        }),
+      )
+      .join("");
+  return fill("controls/clue-columns.html", { across: lines("across"), down: lines("down") }, ["across", "down"]);
 }
 
 function signedIn(session: PlayerSession): string | undefined {
@@ -154,6 +216,12 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/co-opword.css") {
     response.writeHead(200, { "content-type": "text/css; charset=utf-8" });
     response.end(stylesheet);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/session.js") {
+    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+    response.end(readFileSync(join(pagesDir, "session.js")));
     return;
   }
 
@@ -402,6 +470,8 @@ const server = createServer(async (request, response) => {
         .join("");
       const alerts = alertItems === "" ? "" : fill("controls/alerts.html", { items: alertItems }, ["items"]);
       const me = coOpword.whoAmI({ token });
+      const myIndex = opened.players.findIndex((player) => player.displayName === me.displayName);
+      const selected = opened.squares.findIndex((square) => myIndex >= 0 && square.present.includes(me.displayName ?? ""));
       const players = opened.players
         .filter((player) => player.displayName !== null && player.displayName !== me.displayName)
         .map((player) => fill("controls/player.html", { displayName: player.displayName ?? "" }))
@@ -416,13 +486,13 @@ const server = createServer(async (request, response) => {
               title: opened.title,
               invite: opened.invite,
               link,
-              puzzle: fill("controls/puzzle.html", { rows: sessionRows(opened.squares, opened.size) }, ["rows"]),
-              clues: clueColumns(opened.words),
-              current: fill("controls/current-selection.html", { invite: opened.invite }),
+              puzzle: fill("controls/puzzle.html", { rows: sessionRows(opened.squares, opened.size, clueStarts(opened.words, opened.size), opened.players, myIndex) }, ["rows"]),
+              clues: sessionClues(opened.words, opened.size, selected, myIndex < 0 ? "" : `lit ${inkClass(myIndex)}`),
               management: fill("controls/session-management.html", { invite: opened.invite }),
               playersSection: fill("controls/player-status.html", { invite: opened.invite, players, alerts }, ["players", "alerts"]),
+              selected: selected < 0 ? "" : String(selected),
             },
-            ["puzzle", "clues", "current", "management", "playersSection"],
+            ["puzzle", "clues", "management", "playersSection"],
           ),
         ),
       );

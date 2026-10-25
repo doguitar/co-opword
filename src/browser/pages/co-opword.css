@@ -233,16 +233,92 @@ body:has(.spread) {
   align-items: start;
 }
 
+.session .grid {
+  width: auto;
+  max-width: none;
+}
+
 .session .grid td {
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-width: 2.25rem;
+  max-width: 2.25rem;
+  padding: 0;
+  position: relative;
   background: #fff;
   color: #111;
   border-color: #111;
+  vertical-align: middle;
 }
 
 .session .grid td.block {
   background: #111;
+}
+
+.session .grid button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: "Segoe Print", "Bradley Hand", cursive;
+  font-size: 1.35rem;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.session .grid .number {
+  position: absolute;
+  top: 0.05rem;
+  left: 0.12rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.55rem;
+  line-height: 1;
+  text-transform: none;
+}
+
+.session .grid .number:empty {
+  display: none;
+}
+
+.session .grid .letter {
+  text-transform: uppercase;
+}
+
+.session .grid td.ink-0,
+.session .clues li.ink-0 { background: #f6e27a; }
+.session .grid td.ink-1,
+.session .clues li.ink-1 { background: #f5b7b1; }
+.session .grid td.ink-2,
+.session .clues li.ink-2 { background: #a8ddb5; }
+.session .grid td.ink-3,
+.session .clues li.ink-3 { background: #a7c7f2; }
+.session .grid td.ink-4,
+.session .clues li.ink-4 { background: #e3b8f2; }
+.session .grid td.ink-5,
+.session .clues li.ink-5 { background: #f6c99a; }
+
+.session .grid td.guest-ink-0 { box-shadow: inset 0 0 0 3px #c9a227; }
+.session .grid td.guest-ink-1 { box-shadow: inset 0 0 0 3px #c45c54; }
+.session .grid td.guest-ink-2 { box-shadow: inset 0 0 0 3px #3e8f55; }
+.session .grid td.guest-ink-3 { box-shadow: inset 0 0 0 3px #3d6eab; }
+.session .grid td.guest-ink-4 { box-shadow: inset 0 0 0 3px #8d4ea8; }
+.session .grid td.guest-ink-5 { box-shadow: inset 0 0 0 3px #c47a32; }
+
+.session .clues li.lit {
+  font-weight: 700;
+}
+
+#select-square,
+#type-letter,
+#clear-square {
+  display: none;
 }
 
 .session .clues {

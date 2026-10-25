@@ -79,7 +79,7 @@ function footerLinks(body: string): string[][] {
 function clueList(body: string, heading: string): string[] {
   const section = body.match(new RegExp(`<h2>${heading}</h2>\\s*<ul>([\\s\\S]*?)</ul>`));
   assert.ok(section, heading);
-  return [...section[1].matchAll(/<li>(.*?)<\/li>/g)].map((match) => match[1]);
+  return [...section[1].matchAll(/<li[^>]*>(.*?)<\/li>/g)].map((match) => match[1]);
 }
 
 function playerStatus(body: string): string {
@@ -134,7 +134,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(typed.status, 303);
     assert.equal(typed.location, sessionPath(invite));
     const locked = await send(port, "GET", sessionPath(invite), cookie);
-    assert.match(locked.body, new RegExp(`<td>B<br>${displayName}</td>`));
+    assert.match(locked.body, /<td class="selected ink-0">[\s\S]*?<span class="letter">B<\/span>/);
     assert.equal(locked.body.includes("That Square did not take the letter."), false);
 
     const rejected = await send(port, "POST", "/session/letter", cookie, { invite, index: "0", letter: "C" });
@@ -142,7 +142,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(rejected.location, null);
     rejection(rejected.body, invite);
     const back = await send(port, "GET", sessionPath(invite), cookie);
-    assert.match(back.body, new RegExp(`<td>B<br>${displayName}</td>`));
+    assert.match(back.body, /<td class="selected ink-0">[\s\S]*?<span class="letter">B<\/span>/);
     assert.equal(back.body.includes("That Square did not take the letter."), false);
     assert.match(back.body, /Nine As/);
 
@@ -156,8 +156,8 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(notLetter.status, 400);
     rejection(notLetter.body, invite);
     const kept = await send(port, "GET", sessionPath(invite), cookie);
-    assert.match(kept.body, /<td>B<\/td>/);
-    assert.match(kept.body, new RegExp(`<td>A<br>${displayName}</td>`));
+    assert.match(kept.body, /<span class="letter">B<\/span>/);
+    assert.match(kept.body, /<td class="selected ink-0">[\s\S]*?<span class="letter">A<\/span>/);
     assert.equal(kept.body.includes("<td>!"), false);
 
     const closed = await send(port, "POST", "/session/close", cookie, { invite });
@@ -165,8 +165,9 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(closed.location, "/");
     const reopened = await send(port, "GET", sessionPath(invite), cookie);
     assert.equal(reopened.status, 200);
-    assert.match(reopened.body, /<td>B<\/td>/);
-    assert.match(reopened.body, /<td>A<\/td>/);
+    assert.match(reopened.body, /<span class="letter">B<\/span>/);
+    assert.match(reopened.body, /<span class="letter">A<\/span>/);
+    assert.equal(reopened.body.includes("selected ink-0"), false);
     assert.equal(reopened.body.includes("That Square did not take the letter."), false);
 
     const cleared = await send(port, "POST", "/session/clear", cookie, { invite, index: "0" });
@@ -175,7 +176,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     const retyped = await send(port, "POST", "/session/letter", cookie, { invite, index: "0", letter: "Q" });
     assert.equal(retyped.status, 303);
     const replaced = await send(port, "GET", sessionPath(invite), cookie);
-    assert.match(replaced.body, new RegExp(`<td>Q<br>${displayName}</td>`));
+    assert.match(replaced.body, /<td class="selected ink-0">[\s\S]*?<span class="letter">Q<\/span>/);
     assert.equal(replaced.body.includes("<td>B"), false);
     assert.equal(replaced.body.includes("That Square did not take the letter."), false);
 
@@ -189,7 +190,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(blockedClose.status, 400);
     rejection(blockedClose.body, "nope");
     const still = await send(port, "GET", sessionPath(invite), cookie);
-    assert.match(still.body, new RegExp(`<td>Q<br>${displayName}</td>`));
+    assert.match(still.body, /<td class="selected ink-0">[\s\S]*?<span class="letter">Q<\/span>/);
 
     const offer = await send(port, "POST", "/session/offer", cookie, { invite, displayName: "Nobody" });
     assert.equal(offer.status, 400);
@@ -302,7 +303,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(live.body, new RegExp(`<code>${freshInvite}</code>`));
     assert.match(live.body, new RegExp(`<a href="/join\\?invite=${encodeURIComponent(freshInvite)}">`));
     assert.equal(live.body.includes("clipboard"), false);
-    assert.equal(live.body.includes("<script"), false);
+    assert.equal(live.body.replace('<script src="/session.js"></script>', "").includes("<script"), false);
     assert.equal(live.body.includes("Game"), false);
     assert.equal(live.body.includes("<td>A</td>"), false);
     assert.equal(playerStatus(live.body).includes("<li>"), false);
@@ -312,15 +313,12 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.ok(live.body.indexOf("<code>") < liveGrid);
     assert.ok(liveGrid < live.body.indexOf("<h2>Player Status</h2>"));
     assert.ok(live.body.indexOf("<h2>Player Status</h2>") < live.body.indexOf("<h2>Across</h2>"));
-    assert.ok(live.body.indexOf("<h2>Across</h2>") < live.body.indexOf("<h2>Current Selection</h2>"));
-    assert.ok(live.body.indexOf("<h2>Current Selection</h2>") < live.body.indexOf("<h2>Session Management</h2>"));
+    assert.equal(live.body.includes("Current Selection"), false);
+    assert.ok(live.body.indexOf("<h2>Across</h2>") < live.body.indexOf("<h2>Session Management</h2>"));
+    assert.match(live.body, /<span class="number">1<\/span>/);
     assert.ok(live.body.indexOf("<h2>Session Management</h2>") < live.body.indexOf("<footer>"));
     for (const [label, kind] of [
-      ["Type", "filled"],
-      ["Select", "filled"],
       ["Invite Player", "filled"],
-      ["Clear", "plain"],
-      ["Close", "plain"],
       ["Offer friendship", "plain"],
       ["Decline", "plain"],
     ]) {
@@ -328,9 +326,12 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
       assert.ok(found, label);
       assert.match(found[0], new RegExp(`class="${kind}"`));
     }
-    assert.match(live.body, /formaction="\/session\/select"/);
-    assert.match(live.body, /formaction="\/session\/clear"/);
-    assert.match(live.body, /formaction="\/session\/close"/);
+    assert.equal(live.body.includes(">Type<"), false);
+    assert.equal(live.body.includes(">Select<"), false);
+    assert.equal(live.body.includes(">Clear<"), false);
+    assert.equal(live.body.includes(">Close<"), false);
+    assert.match(live.body, /action="\/session\/select"/);
+    assert.match(live.body, /action="\/session\/clear"/);
     assert.match(live.body, /action="\/session\/letter"/);
     assert.match(live.body, /action="\/session\/invite"/);
     assert.match(live.body, /action="\/session\/offer"/);
