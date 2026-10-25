@@ -310,11 +310,11 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.deepEqual(clueList(live.body, "Down"), []);
     const liveGrid = live.body.indexOf('<table class="grid">');
     assert.ok(live.body.indexOf("<code>") < liveGrid);
-    assert.ok(liveGrid < live.body.indexOf("<h2>Across</h2>"));
+    assert.ok(liveGrid < live.body.indexOf("<h2>Player Status</h2>"));
+    assert.ok(live.body.indexOf("<h2>Player Status</h2>") < live.body.indexOf("<h2>Across</h2>"));
     assert.ok(live.body.indexOf("<h2>Across</h2>") < live.body.indexOf("<h2>Current Selection</h2>"));
     assert.ok(live.body.indexOf("<h2>Current Selection</h2>") < live.body.indexOf("<h2>Session Management</h2>"));
-    assert.ok(live.body.indexOf("<h2>Session Management</h2>") < live.body.indexOf("<h2>Player Status</h2>"));
-    assert.ok(live.body.indexOf("<h2>Player Status</h2>") < live.body.indexOf("<footer>"));
+    assert.ok(live.body.indexOf("<h2>Session Management</h2>") < live.body.indexOf("<footer>"));
     for (const [label, kind] of [
       ["Type", "filled"],
       ["Select", "filled"],

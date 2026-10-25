@@ -247,6 +247,7 @@ body:has(.spread) {
 
 .session .clues {
   display: flex;
+  flex-direction: column;
   gap: 1rem;
 }
 
