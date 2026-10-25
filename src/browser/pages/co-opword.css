@@ -151,6 +151,7 @@ body:has(.spread) {
   padding: 1.5rem 2rem 5.5rem;
   background: #fff;
   transition: width 0.35s ease;
+  container-type: inline-size;
 }
 
 .spread:has(.page-turn:checked) .leaf {
@@ -158,7 +159,6 @@ body:has(.spread) {
   border-right: 1px solid #111;
 }
 
-.spread .leaf > header,
 .spread main,
 .spread .leaf > footer {
   width: 100%;
@@ -166,19 +166,24 @@ body:has(.spread) {
 }
 
 .spread .leaf > header {
+  width: 100%;
+  min-width: 0;
   margin-bottom: 1.25rem;
-  padding-top: 0.4rem;
-  border-top: 1px solid #111;
+  padding-top: 0.35rem;
+  padding-bottom: 0.18rem;
+  border-bottom: 3px solid #111;
+  text-align: center;
 }
 
 .spread .brand {
   margin: 0;
-  padding-bottom: 0.35rem;
-  border-bottom: 3px solid #111;
-  font-size: 2.6rem;
+  padding-bottom: 0.22rem;
+  border-bottom: 1px solid #111;
+  font-size: clamp(2rem, min(8.7vh, 10cqi), 6rem);
   font-weight: 700;
   letter-spacing: 0.02em;
-  line-height: 1.05;
+  line-height: 0.95;
+  white-space: nowrap;
 }
 
 .spread form {
@@ -208,6 +213,7 @@ body:has(.spread) {
 }
 
 .spread button.filled {
+  box-sizing: border-box;
   width: 100%;
   color: #111;
   background: #ccc;
@@ -218,6 +224,62 @@ body:has(.spread) {
 .spread .leaf > footer p {
   margin: 1.5rem 0 0;
   color: #555;
+}
+
+.spread .leaf:has(form[action="/sign-in"]) {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 1.25rem;
+}
+
+.spread .leaf:has(form[action="/sign-in"]) > main {
+  align-self: center;
+  width: min(100%, 45%);
+  max-width: none;
+  min-width: 0;
+}
+
+.spread:has(.page-turn:checked) .leaf:has(form[action="/sign-in"]) > main {
+  width: min(100%, 38rem);
+}
+
+.spread form[action="/sign-in"] {
+  align-items: stretch;
+  width: 100%;
+  text-align: left;
+  font-size: clamp(1.35rem, 4.4vh, 2.6rem);
+  gap: clamp(0.75rem, 1.7vh, 1.35rem);
+}
+
+.spread form[action="/sign-in"] label {
+  gap: 0.7rem;
+}
+
+.spread form[action="/sign-in"] input,
+.spread form[action="/sign-in"] button.filled {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: clamp(2.75rem, 7.55vh, 4.75rem);
+  font-size: clamp(1.05rem, 2.5vh, 1.6rem);
+}
+
+.spread form[action="/sign-in"] button.filled {
+  white-space: normal;
+}
+
+.spread .leaf:has(form[action="/sign-in"]) > footer {
+  width: 100%;
+  max-width: none;
+  margin-top: auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid #111;
+  text-align: center;
+}
+
+.spread .leaf:has(form[action="/sign-in"]) > footer p {
+  margin: 0.35rem 0 0;
+  text-align: center;
 }
 
 .spread .menu {
@@ -305,8 +367,8 @@ body:has(.spread) {
     padding: 1.25rem 1.25rem 5.5rem;
   }
 
-  .spread .brand {
-    font-size: 2.15rem;
+  .spread .leaf:has(form[action="/sign-in"]) > main {
+    width: 100%;
   }
 
   .spread:has(.page-turn:checked) .leaf {
