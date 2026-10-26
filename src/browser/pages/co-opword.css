@@ -709,6 +709,24 @@ body:has(.session) {
   text-align: center;
 }
 
+.spread .leaf:has(.notice) > main {
+  align-self: center;
+  align-items: center;
+  width: min(100%, 45%);
+  max-width: none;
+  text-align: center;
+  font-size: clamp(1.35rem, 4.4vh, 2.6rem);
+  gap: 1rem;
+}
+
+.spread .notice {
+  margin: 0;
+}
+
+.spread .leaf:has(.notice) a {
+  color: #111;
+}
+
 .spread .menu {
   position: absolute;
   z-index: 0;

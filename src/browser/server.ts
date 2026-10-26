@@ -294,7 +294,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    send(response, 200, fill(url.pathname === "/about" ? "about.html" : "support.html"));
+    send(response, 200, frame(fill(url.pathname === "/about" ? "about.html" : "support.html")));
     return;
   }
 
@@ -617,7 +617,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    send(response, 200, messageLink("The Grid matched.", "/completions", "Completions"));
+    send(response, 200, frame(messageLink("The Grid matched.", "/completions", "Completions")));
     return;
   }
 

@@ -218,24 +218,47 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(about.body, /About Us is coming soon\./);
     assert.equal(about.body.includes("Support is coming soon."), false);
     assert.equal(about.body.includes("<summary>Menu</summary>"), false);
-    assert.equal(about.body.includes("<footer>"), false);
+    assert.match(about.body, /<p class="brand">Co-opword<\/p>/);
+    assert.match(about.body, /<footer>/);
     assert.equal(about.body.includes("Game"), false);
     assert.equal(about.body.includes("<style"), false);
     assert.deepEqual(
       [...about.body.matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map((match) => [match[1], match[2]]),
-      [["/", "Home"]],
+      [
+        ["/", "Home"],
+        ["/library", "Library"],
+        ["/publish", "Publish"],
+        ["/published", "Published"],
+        ["/completions", "Completions"],
+        ["/about", "About"],
+        ["/support", "Support"],
+      ],
     );
     const support = await send(port, "GET", "/support", cookie);
     assert.equal(support.status, 200);
     assert.match(support.body, /Support is coming soon\./);
     assert.equal(support.body.includes("About Us is coming soon."), false);
     assert.equal(support.body.includes("<summary>Menu</summary>"), false);
-    assert.equal(support.body.includes("<footer>"), false);
+    assert.match(support.body, /<p class="brand">Co-opword<\/p>/);
+    assert.match(support.body, /<footer>/);
     assert.equal(support.body.includes("Game"), false);
     assert.deepEqual(
       [...support.body.matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map((match) => [match[1], match[2]]),
-      [["/", "Home"]],
+      [
+        ["/", "Home"],
+        ["/library", "Library"],
+        ["/publish", "Publish"],
+        ["/published", "Published"],
+        ["/completions", "Completions"],
+        ["/about", "About"],
+        ["/support", "Support"],
+      ],
     );
+    const matched = await send(port, "GET", "/match", cookie);
+    assert.equal(matched.status, 200);
+    assert.match(matched.body, /<p class="notice">The Grid matched\.<\/p>/);
+    assert.match(matched.body, /<a href="\/completions">Completions<\/a>/);
+    assert.match(matched.body, /<footer>/);
 
     const signedOut = await send(port, "GET", "/", null);
     assert.match(signedOut.body, /Email me a magic link/);
