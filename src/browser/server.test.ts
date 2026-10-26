@@ -286,27 +286,31 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(first.body.includes(">Type<"), false);
     assert.equal(first.body.includes("Offer friendship"), false);
     assert.equal(first.body.includes("Game"), false);
-    assert.deepEqual(menuLinks(first.body), [
-      ["/", "Home"],
-      ["/library", "Library"],
-      ["/publish", "Publish"],
-      ["/published", "Published"],
-      ["/completions", "Completions"],
-    ]);
-    assert.deepEqual(footerLinks(first.body), [
-      ["/about", "About Us"],
-      ["/support", "Support"],
-      ["/completions", "Completions"],
-    ]);
+    const menu = first.body.match(/<nav class="menu"[\s\S]*?<\/nav>/);
+    assert.ok(menu);
+    assert.deepEqual(
+      [...menu[0].matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map((match) => [match[1], match[2]]),
+      [
+        ["/", "Home"],
+        ["/library", "Library"],
+        ["/publish", "Publish"],
+        ["/published", "Published"],
+        ["/completions", "Completions"],
+        ["/about", "About"],
+        ["/support", "Support"],
+      ],
+    );
+    assert.match(first.body, /\(C\) Co-opword/);
     assert.deepEqual(clueList(first.body, "Across"), ["across 9: Nine As"]);
     assert.deepEqual(clueList(first.body, "Down"), []);
     assert.equal(first.body.split('<td class="block"></td>').length - 1, 72);
     assert.equal(first.body.split("<td>A</td>").length - 1, 9);
     const firstGrid = first.body.indexOf('<table class="grid">');
-    assert.ok(first.body.indexOf("<header>") < first.body.indexOf("<h1>"));
+    assert.ok(first.body.indexOf("<header>") < first.body.indexOf("<footer>"));
+    assert.ok(first.body.indexOf("<footer>") < first.body.indexOf("<main>"));
+    assert.ok(first.body.indexOf("<main>") < first.body.indexOf("<h1>"));
     assert.ok(firstGrid < first.body.indexOf("Start a Session"));
     assert.ok(first.body.indexOf("Start a Session") < first.body.indexOf("<h2>Across</h2>"));
-    assert.ok(first.body.indexOf("<h2>Across</h2>") < first.body.indexOf("<footer>"));
     assert.match(first.body, /<a href="\/library">Library<\/a>/);
     assert.match(first.body, /<form method="post" action="\/session">/);
 

@@ -801,6 +801,65 @@ body:has(.session) {
   text-align: center;
 }
 
+.spread .leaf:has(.crossword) > main {
+  width: 100%;
+  max-width: none;
+}
+
+.spread .crossword h1 {
+  margin: 0 0 1rem;
+  text-align: center;
+}
+
+.spread .crossword .board {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.5rem;
+}
+
+.spread .crossword .grid {
+  width: auto;
+  max-width: none;
+}
+
+.spread .crossword .grid td {
+  width: 1.75rem;
+  height: 1.75rem;
+  background: #fff;
+  color: #111;
+  border-color: #111;
+}
+
+.spread .crossword .grid td.block {
+  background: #111;
+}
+
+.spread .crossword .controls {
+  flex: 0 0 14rem;
+}
+
+.spread .crossword .clues {
+  display: flex;
+  gap: 2rem;
+}
+
+.spread .crossword .clues section {
+  flex: 1 1 0;
+}
+
+.spread .crossword a {
+  color: #111;
+}
+
+.spread .leaf:has(.crossword) > footer {
+  width: 100%;
+  max-width: none;
+  margin-top: auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid #111;
+  text-align: center;
+}
+
 .spread .leaf:has(.notice) > main {
   align-self: center;
   align-items: center;

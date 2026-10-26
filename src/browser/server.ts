@@ -318,16 +318,16 @@ const server = createServer(async (request, response) => {
       send(
         response,
         200,
-        fill(
-          "crossword.html",
-          {
-            header: fill("controls/header.html"),
-            title: opened.title,
-            rows: libraryRows(opened.squares, opened.size),
-            clues: clueColumns(opened.words),
-            footer: fill("controls/footer.html"),
-          },
-          ["header", "rows", "clues", "footer"],
+        frame(
+          fill(
+            "crossword.html",
+            {
+              title: opened.title,
+              rows: libraryRows(opened.squares, opened.size),
+              clues: clueColumns(opened.words),
+            },
+            ["rows", "clues"],
+          ),
         ),
       );
     } catch {
