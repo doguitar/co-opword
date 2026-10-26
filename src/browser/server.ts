@@ -391,7 +391,7 @@ const server = createServer(async (request, response) => {
         return fill("controls/published-item.html", { href, title: crossword.title, author: crossword.author === "" ? "no Author" : crossword.author });
       })
       .join("");
-    send(response, 200, fill("published.html", { items }, ["items"]));
+    send(response, 200, frame(fill("published.html", { items }, ["items"])));
     return;
   }
 

@@ -775,17 +775,20 @@ body:has(.session) {
   font-size: clamp(1.6rem, 4vh, 2.4rem);
 }
 
-.spread .library ul {
+.spread .library ul,
+.spread .published ul {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.spread .library li {
+.spread .library li,
+.spread .published li {
   border-bottom: 1px solid #111;
 }
 
-.spread .library a {
+.spread .library a,
+.spread .published a {
   display: block;
   padding: 0.6rem 0;
   color: #111;
