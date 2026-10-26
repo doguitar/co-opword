@@ -640,7 +640,7 @@ const server = createServer(async (request, response) => {
         );
       })
       .join("");
-    send(response, 200, fill("completions.html", { items }, ["items"]));
+    send(response, 200, frame(fill("completions.html", { items }, ["items"])));
     return;
   }
 

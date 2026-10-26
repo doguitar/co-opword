@@ -888,6 +888,17 @@ body:has(.session) {
   min-height: clamp(2.75rem, 7.55vh, 4.75rem);
 }
 
+.spread .completions section {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #111;
+}
+
+.spread .completions h2,
+.spread .completions p,
+.spread .completions ul {
+  margin: 0.25rem 0;
+}
+
 .spread .leaf:has(.notice) > main {
   align-self: center;
   align-items: center;
