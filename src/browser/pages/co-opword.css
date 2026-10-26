@@ -166,8 +166,7 @@ body:has(.session) {
   border-right: 1px solid #111;
 }
 
-.spread main,
-.spread .leaf > footer {
+.spread main {
   width: 100%;
   max-width: 44rem;
 }
@@ -181,7 +180,12 @@ body:has(.session) {
 
 .spread .leaf > footer {
   order: 2;
+  width: 100%;
+  max-width: none;
   margin-top: auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid #111;
+  text-align: center;
 }
 
 .spread .leaf > header {
@@ -256,8 +260,7 @@ body:has(.session) {
   font-size: min(4.9rem, 8.7vh);
 }
 
-.spread main:has(.session),
-.spread .leaf:has(.session) > footer {
+.spread main:has(.session) {
   max-width: none;
 }
 
@@ -649,8 +652,9 @@ body:has(.session) {
 }
 
 .spread .leaf > footer p {
-  margin: 1.5rem 0 0;
+  margin: 0.35rem 0 0;
   color: #555;
+  text-align: center;
 }
 
 .spread .leaf:has(form[action="/sign-in"]) {
@@ -695,20 +699,6 @@ body:has(.session) {
   white-space: normal;
 }
 
-.spread .leaf:has(form[action="/sign-in"]) > footer {
-  width: 100%;
-  max-width: none;
-  margin-top: auto;
-  padding-top: 0.4rem;
-  border-top: 1px solid #111;
-  text-align: center;
-}
-
-.spread .leaf:has(form[action="/sign-in"]) > footer p {
-  margin: 0.35rem 0 0;
-  text-align: center;
-}
-
 .spread .leaf:has(.home) > main {
   align-self: center;
   width: min(100%, 45%);
@@ -750,15 +740,6 @@ body:has(.session) {
   min-height: clamp(2.75rem, 7.55vh, 4.75rem);
 }
 
-.spread .leaf:has(.home) > footer {
-  width: 100%;
-  max-width: none;
-  margin-top: auto;
-  padding-top: 0.4rem;
-  border-top: 1px solid #111;
-  text-align: center;
-}
-
 .spread .leaf:has(.column) > main {
   align-self: center;
   width: min(100%, 45%);
@@ -793,15 +774,6 @@ body:has(.session) {
   padding: 0.6rem 0;
   color: #111;
   font-size: clamp(1.2rem, 3vh, 1.8rem);
-}
-
-.spread .leaf:has(.column) > footer {
-  width: 100%;
-  max-width: none;
-  margin-top: auto;
-  padding-top: 0.4rem;
-  border-top: 1px solid #111;
-  text-align: center;
 }
 
 .spread .leaf:has(.crossword) > main {
@@ -861,15 +833,6 @@ body:has(.session) {
   list-style: none;
 }
 
-.spread .leaf:has(.crossword) > footer {
-  width: 100%;
-  max-width: none;
-  margin-top: auto;
-  padding-top: 0.4rem;
-  border-top: 1px solid #111;
-  text-align: center;
-}
-
 .spread .publish textarea {
   box-sizing: border-box;
   width: 100%;
@@ -911,6 +874,40 @@ body:has(.session) {
 
 .spread .notice {
   margin: 0;
+}
+
+.spread form.build {
+  align-items: flex-start;
+  gap: 0.75rem;
+  width: min(100%, 40rem);
+}
+
+.spread form.build .grid {
+  width: auto;
+  max-width: none;
+}
+
+.spread form.build .grid td {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+}
+
+.spread form.build .grid input {
+  box-sizing: border-box;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.spread form.build .clues {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .spread .leaf:has(.notice) a {
