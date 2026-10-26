@@ -406,7 +406,8 @@ const server = createServer(async (request, response) => {
       send(
         response,
         200,
-        fill(
+        frame(
+          fill(
           "published-crossword.html",
           {
             title: opened.title,
@@ -417,6 +418,7 @@ const server = createServer(async (request, response) => {
             clues: clues(opened.words),
           },
           ["rows", "clues"],
+        ),
         ),
       );
     } catch {

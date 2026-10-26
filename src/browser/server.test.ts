@@ -438,7 +438,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(published.body, /Start a Session/);
     assert.equal(published.body.includes("<summary>Menu</summary>"), false);
     assert.equal(published.body.includes("About Us"), false);
-    assert.equal(published.body.includes('href="/support"'), false);
+    assert.match(published.body, /<section class="crossword published-crossword">/);
     assert.equal(published.body.includes("Game"), false);
   } finally {
     if (child.exitCode === null) {
@@ -512,7 +512,7 @@ test("a signed-in Player sees the Grid and Words of a published Freestyle Crossw
     assert.match(blank.body, new RegExp(`<input type="hidden" name="title" value="${title}">`));
     assert.match(blank.body, /<input type="hidden" name="author" value="">/);
     assert.equal(blank.body.includes('value="no Author"'), false);
-    assert.match(blank.body, /<button type="submit">Start a Session<\/button>/);
+    assert.match(blank.body, /<button type="submit" class="filled">Start a Session<\/button>/);
 
     const named = await send(port, "GET", `/published-crossword?title=${encodeURIComponent(title)}&author=${encodeURIComponent("Ada")}`, cookie);
     assert.equal(named.status, 200);

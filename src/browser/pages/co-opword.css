@@ -854,6 +854,13 @@ body:has(.session) {
   color: #111;
 }
 
+.spread .published-crossword .clues,
+.spread .published-crossword ul {
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
+}
+
 .spread .leaf:has(.crossword) > footer {
   width: 100%;
   max-width: none;
