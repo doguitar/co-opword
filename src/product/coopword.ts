@@ -99,7 +99,7 @@ export type OpenedSession = {
   size: number;
   squares: { letter: string | null; locked: boolean; present: string[]; block: boolean }[];
   words: OpenedLibraryCrossword["words"];
-  players: { displayName: string | null }[];
+  players: { displayName: string | null; letters: number }[];
 };
 
 export type CoOpword = {
@@ -128,7 +128,7 @@ export type CoOpword = {
   offerFriendship(session: PlayerSession, invite: string, displayName: string): void;
   declineFriendship(session: PlayerSession, invite: string, displayName: string): void;
   sessionAlerts(session: PlayerSession, invite: string): { displayName: string | null; kind: "pending" | "declined" }[];
-  friends(session: PlayerSession): { displayName: string | null }[];
+  friends(session: PlayerSession): { displayName: string | null; email: string }[];
   inviteEmail(session: PlayerSession, invite: string, email: string): { email: string; token: string | null };
   snapshot(): string;
 };
@@ -385,13 +385,14 @@ export function openCoOpword(snapshot?: string): CoOpword {
           kind: offer.status,
         }));
     },
-    friends(session: PlayerSession): { displayName: string | null }[] {
+    friends(session: PlayerSession): { displayName: string | null; email: string }[] {
       const player = playerFor(session);
       return state.friends
         .filter((pairIds) => pairIds.a === player.id || pairIds.b === player.id)
         .map((pairIds) => {
           const otherId = pairIds.a === player.id ? pairIds.b : pairIds.a;
-          return { displayName: state.players.find((entry) => entry.id === otherId)?.displayName ?? null };
+          const other = state.players.find((entry) => entry.id === otherId);
+          return { displayName: other?.displayName ?? null, email: other?.email ?? "" };
         });
     },
     inviteEmail(session: PlayerSession, invite: string, email: string): { email: string; token: string | null } {
@@ -551,7 +552,10 @@ export function openCoOpword(snapshot?: string): CoOpword {
         block: square === "#",
       })),
       words: live.crossword.words,
-      players: live.memberIds.map((playerId) => ({ displayName: nameOf(playerId) })),
+      players: live.memberIds.map((playerId) => ({
+        displayName: nameOf(playerId),
+        letters: live.writtenBy.filter((id, index) => id === playerId && live.letters[index] !== null).length,
+      })),
     };
   }
 }

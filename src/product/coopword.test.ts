@@ -335,7 +335,8 @@ test("two Players fill one Session from a library Crossword, and the first lette
   const before = coOpword.openSession(sam, first.invite);
   assert.equal(before.squares[0].letter, null);
   assert.equal(before.squares[0].letter === "A", false);
-  assert.deepEqual(before.players.map((player) => player.displayName).sort(), ["Ada", "Sam"]);
+  assert.deepEqual(before.players.map((player) => player.displayName), ["Ada", "Sam"]);
+  assert.deepEqual(before.players.map((player) => player.letters), [0, 0]);
   assert.equal(before.words[0].clue, "Nine As");
 
   coOpword.selectSquare(ada, first.invite, 0);
@@ -346,6 +347,10 @@ test("two Players fill one Session from a library Crossword, and the first lette
   assert.deepEqual(present.squares[1].present.sort(), ["Ada", "Sam"]);
 
   coOpword.typeLetter(ada, first.invite, "b");
+  assert.deepEqual(
+    coOpword.openSession(ada, first.invite).players.map((player) => player.letters),
+    [1, 0],
+  );
   assert.throws(() => coOpword.typeLetter(sam, first.invite, "C"), CrosswordRejected);
   assert.equal(coOpword.openSession(sam, first.invite).squares[1].letter, "B");
 
@@ -355,6 +360,7 @@ test("two Players fill one Session from a library Crossword, and the first lette
   const kept = openCoOpword(coOpword.snapshot());
   const restored = kept.openSession(ada, first.invite);
   assert.equal(restored.squares[1].letter, "C");
+  assert.deepEqual(restored.players.map((player) => player.letters), [0, 1]);
   assert.equal(restored.squares[1].locked, true);
   assert.deepEqual(restored.players.map((player) => player.displayName).sort(), ["Ada", "Sam"]);
   assert.equal(kept.openLibraryCrossword(ada, "Tiny").squares[1], "A");
@@ -505,7 +511,7 @@ test("friendship is offered inside one Session, and a decline is visible only to
   coOpword.joinSession(sam, other);
   coOpword.offerFriendship(sam, other, "Ada");
   coOpword.offerFriendship(ada, other, "Sam");
-  assert.deepEqual(coOpword.friends(ada), [{ displayName: "Sam" }]);
+  assert.deepEqual(coOpword.friends(ada), [{ displayName: "Sam", email: "sam@example.com" }]);
   assert.deepEqual(coOpword.sessionAlerts(ada, invite), [{ displayName: "Sam", kind: "declined" }]);
 
   const kept = openCoOpword();

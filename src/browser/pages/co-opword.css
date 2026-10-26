@@ -132,6 +132,11 @@ body:has(.spread) {
   color: #111;
 }
 
+body:has(.session) {
+  height: 100dvh;
+  overflow: hidden;
+}
+
 .spread {
   position: relative;
   min-height: 100vh;
@@ -145,10 +150,12 @@ body:has(.spread) {
   position: relative;
   z-index: 1;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   min-height: 100vh;
   min-height: 100dvh;
-  padding: 1.5rem 2rem 5.5rem;
+  padding: 1.5rem 2rem;
   background: #fff;
   transition: width 0.35s ease;
   container-type: inline-size;
@@ -163,6 +170,18 @@ body:has(.spread) {
 .spread .leaf > footer {
   width: 100%;
   max-width: 44rem;
+}
+
+.spread .leaf > main {
+  order: 1;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.spread .leaf > footer {
+  order: 2;
+  margin-top: auto;
 }
 
 .spread .leaf > header {
@@ -221,34 +240,152 @@ body:has(.spread) {
   font-size: clamp(1rem, 1.5vw, 1.5rem);
 }
 
+.spread:has(.session),
+.spread .leaf:has(.session) {
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.spread .leaf:has(.session) {
+  transition: none;
+}
+
+.spread .leaf:has(.session) .brand {
+  font-size: min(4.9rem, 8.7vh);
+}
+
 .spread main:has(.session),
 .spread .leaf:has(.session) > footer {
   max-width: none;
 }
 
+.spread main:has(.session) {
+  align-items: center;
+  flex: 1 1 0;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.spread .leaf:has(.session) > footer {
+  flex: 0 0 auto;
+}
+
 .session {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1.5rem;
-  align-items: start;
+  flex: 1 1 0;
+  align-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 2rem;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.session-column {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.session-column + .session-column {
+  position: relative;
+}
+
+.session-column + .session-column::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1rem;
+  border-left: 1px solid #111;
+}
+
+.session h1 {
+  grid-column: 1 / -1;
+  margin: 0 0 0.6rem;
+  text-align: center;
+}
+
+.session .puzzle-block {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.session .grid,
+.session .grid tbody {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
 .session .grid {
-  width: auto;
-  max-width: none;
+  box-sizing: border-box;
+  width: calc(100dvh - 23rem);
+  height: calc(100dvh - 23rem);
+  max-width: 100%;
+}
+
+.session .grid tbody {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.session .grid tr {
+  display: grid;
+  flex: 1 1 0;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  width: 100%;
+  max-width: 100%;
+  min-height: 0;
 }
 
 .session .grid td {
-  width: 2.25rem;
-  height: 2.25rem;
-  min-width: 2.25rem;
-  max-width: 2.25rem;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  max-width: none;
+  height: 100%;
+  aspect-ratio: auto;
+  box-sizing: border-box;
   padding: 0;
   position: relative;
   background: #fff;
   color: #111;
+  border-style: solid;
   border-color: #111;
+  border-width: 0 1px 1px 0;
   vertical-align: middle;
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.session .grid tr td:first-child {
+  border-left-width: 1px;
+}
+
+.session .grid tr:first-child td {
+  border-top-width: 1px;
 }
 
 .session .grid td.block {
@@ -261,13 +398,14 @@ body:has(.spread) {
   justify-content: center;
   width: 100%;
   height: 100%;
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
   font-family: "Segoe Print", "Bradley Hand", cursive;
-  font-size: 1.35rem;
+  font-size: 62cqi;
   line-height: 1;
   text-transform: uppercase;
   cursor: pointer;
@@ -291,25 +429,164 @@ body:has(.spread) {
   text-transform: uppercase;
 }
 
-.session .grid td.ink-0,
-.session .clues li.ink-0 { background: #f6e27a; }
-.session .grid td.ink-1,
-.session .clues li.ink-1 { background: #f5b7b1; }
-.session .grid td.ink-2,
-.session .clues li.ink-2 { background: #a8ddb5; }
-.session .grid td.ink-3,
-.session .clues li.ink-3 { background: #a7c7f2; }
-.session .grid td.ink-4,
-.session .clues li.ink-4 { background: #e3b8f2; }
-.session .grid td.ink-5,
-.session .clues li.ink-5 { background: #f6c99a; }
 
-.session .grid td.guest-ink-0 { box-shadow: inset 0 0 0 3px #c9a227; }
-.session .grid td.guest-ink-1 { box-shadow: inset 0 0 0 3px #c45c54; }
-.session .grid td.guest-ink-2 { box-shadow: inset 0 0 0 3px #3e8f55; }
-.session .grid td.guest-ink-3 { box-shadow: inset 0 0 0 3px #3d6eab; }
-.session .grid td.guest-ink-4 { box-shadow: inset 0 0 0 3px #8d4ea8; }
-.session .grid td.guest-ink-5 { box-shadow: inset 0 0 0 3px #c47a32; }
+.session .player-status ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.session .player-status {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  min-height: calc(2 * (1.2em + 0.3rem) + 0.4rem);
+  margin-top: 0.45rem;
+}
+
+.session .clues {
+  width: 100%;
+  max-width: 100%;
+  text-align: left;
+}
+
+.session .clues h2 {
+  text-align: center;
+}
+
+.session .player-status {
+  text-align: center;
+}
+
+.session .clues ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.session .player-status .roster {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.session .player-status .roster li {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid #111;
+  transition: gap 0.16s ease;
+}
+
+.session .player-status .roster li:hover,
+.session .player-status .roster li:focus-within {
+  gap: 0.45rem;
+}
+
+.session .player-status .roster .bond {
+  min-width: 0;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  transition: max-width 0.16s ease, opacity 0.16s ease;
+}
+
+.session .player-status .roster li:hover .bond,
+.session .player-status .roster li:focus-within .bond {
+  max-width: 2.5rem;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.session .player-status .roster .bond button {
+  padding: 0;
+  line-height: 1;
+}
+
+.session .player-status .roster li.invite {
+  background: #fff;
+}
+
+.session .player-status .roster li.invite button {
+  padding: 0;
+}
+
+.session dialog {
+  width: min(22rem, calc(100% - 2rem));
+  border: 1px solid #111;
+  padding: 1rem;
+  background: #fff;
+  color: #111;
+}
+
+.session dialog::backdrop {
+  background: rgb(17 17 17 / 0.45);
+}
+
+.session dialog .invite-friends {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+}
+
+.session dialog .invite-friends button {
+  padding: 0.15rem 0;
+}
+
+.session .toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  z-index: 2;
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #111;
+  background: #fff;
+  color: #111;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: opacity 0.2s ease;
+}
+
+.session .toast.show {
+  opacity: 1;
+}
+
+/* Hue steps by the golden angle so the next player stays far from the ones already seated. */
+.session .ink-0 { --ink: hsl(0 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-1 { --ink: hsl(137.5 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-2 { --ink: hsl(275 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-3 { --ink: hsl(52.5 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-4 { --ink: hsl(190 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-5 { --ink: hsl(327.5 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-6 { --ink: hsl(105 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-7 { --ink: hsl(242.5 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-8 { --ink: hsl(20 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-9 { --ink: hsl(157.5 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-10 { --ink: hsl(295 72% 46% / 0.55); background-color: var(--ink); }
+.session .ink-11 { --ink: hsl(72.5 72% 46% / 0.55); background-color: var(--ink); }
+
+.session .grid td.ink-0,
+.session .grid td.ink-1,
+.session .grid td.ink-2,
+.session .grid td.ink-3,
+.session .grid td.ink-4,
+.session .grid td.ink-5,
+.session .grid td.ink-6,
+.session .grid td.ink-7,
+.session .grid td.ink-8,
+.session .grid td.ink-9,
+.session .grid td.ink-10,
+.session .grid td.ink-11 {
+  background-color: var(--ink);
+}
 
 .session .grid td.reject button {
   animation: square-flash 0.55s ease;
@@ -332,13 +609,26 @@ body:has(.spread) {
 }
 
 .session .clues {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  display: grid;
+  flex: 1 1 0;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+  align-content: start;
+  column-gap: 1rem;
+  height: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
 }
 
 .session .clues section {
-  flex: 1 1 0;
+  min-width: 0;
+  text-align: left;
+}
+
+.session .clues li {
+  text-align: left;
 }
 
 .session form {
@@ -351,6 +641,10 @@ body:has(.spread) {
 @media (max-width: 720px) {
   .session {
     grid-template-columns: 1fr;
+  }
+
+  .session-column + .session-column::before {
+    content: none;
   }
 }
 
@@ -497,7 +791,7 @@ body:has(.spread) {
 
 @media (max-width: 720px) {
   .spread .leaf {
-    padding: 1.25rem 1.25rem 5.5rem;
+    padding: 1.25rem;
   }
 
   .spread .leaf:has(form[action="/sign-in"]) > main {

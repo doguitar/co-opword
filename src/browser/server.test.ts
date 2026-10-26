@@ -302,27 +302,30 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(live.body, /\(C\) Co-opword/);
     assert.match(live.body, /class="page-turn"/);
     assert.equal(live.body.includes("<summary>Menu</summary>"), false);
-    assert.match(live.body, new RegExp(`<code>${freshInvite}</code>`));
-    assert.match(live.body, new RegExp(`<a href="/join\\?invite=${encodeURIComponent(freshInvite)}">`));
+    assert.equal(live.body.includes("<code>"), false);
+    assert.match(live.body, new RegExp(`<button type="button" class="plain" id="copy-invite" data-invite-link="/join\\?invite=${encodeURIComponent(freshInvite)}">Invite Link</button>`));
     assert.equal(live.body.includes("clipboard"), false);
-    assert.equal(live.body.replace('<script src="/session.js?v=4"></script>', "").includes("<script"), false);
+    assert.equal(live.body.replace('<script src="/session.js?v=8"></script>', "").includes("<script"), false);
     assert.equal(live.body.includes("Game"), false);
     assert.equal(live.body.includes("<td>A</td>"), false);
-    assert.equal(playerStatus(live.body).includes("<li>"), false);
+    assert.match(playerStatus(live.body), new RegExp(`<li class="ink-0"><span class="who">${displayName} <span class="letters">0</span></span></li>`));
     assert.deepEqual(clueList(live.body, "Across"), ["1. Nine As"]);
     assert.deepEqual(clueList(live.body, "Down"), []);
     const liveGrid = live.body.indexOf('<table class="grid">');
-    assert.ok(live.body.indexOf("<code>") < liveGrid);
-    assert.ok(liveGrid < live.body.indexOf("<h2>Player Status</h2>"));
-    assert.ok(live.body.indexOf("<h2>Player Status</h2>") < live.body.indexOf("<h2>Across</h2>"));
+    assert.ok(live.body.indexOf("<h1>") < liveGrid);
+    assert.ok(liveGrid < live.body.indexOf('<section class="player-status">'));
+    assert.ok(live.body.indexOf('<section class="player-status">') < live.body.indexOf("<h2>Across</h2>"));
     assert.equal(live.body.includes("Current Selection"), false);
-    assert.ok(live.body.indexOf("<h2>Across</h2>") < live.body.indexOf("<h2>Session Management</h2>"));
+    assert.equal(live.body.includes("Session Management"), false);
     assert.match(live.body, /<span class="number">1<\/span>/);
-    assert.ok(live.body.indexOf("<h2>Session Management</h2>") < live.body.indexOf("<footer>"));
+    assert.match(live.body, /<li class="invite"><button type="button" class="plain" id="open-invite">Invite<\/button><\/li>/);
+    assert.match(live.body, /<dialog id="invite-players">/);
+    assert.match(live.body, /<button type="button" class="plain" id="close-invite">Cancel<\/button>/);
+    assert.ok(live.body.indexOf('<section class="player-status">') < live.body.indexOf('id="open-invite"'));
+    assert.ok(live.body.indexOf("<footer>") < live.body.indexOf("<main>"));
+    assert.ok(live.body.indexOf("<main>") < live.body.indexOf('id="open-invite"'));
     for (const [label, kind] of [
       ["Invite Player", "filled"],
-      ["Offer friendship", "plain"],
-      ["Decline", "plain"],
     ]) {
       const found = live.body.match(new RegExp(`<button[^>]*>${label}</button>`));
       assert.ok(found, label);
@@ -336,15 +339,15 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(live.body, /action="\/session\/clear"/);
     assert.match(live.body, /action="\/session\/letter"/);
     assert.match(live.body, /action="\/session\/invite"/);
-    assert.match(live.body, /action="\/session\/offer"/);
-    assert.match(live.body, /formaction="\/session\/decline"/);
-    assert.match(live.body, /name="displayName"/);
+    assert.equal(live.body.includes("Offer friendship"), false);
+    assert.equal(live.body.includes("<h2>Player Status</h2>"), false);
     assert.match(live.body, /name="email"/);
     assert.match(live.body, /name="index"/);
     assert.match(live.body, /name="letter"/);
 
     const samName = `Sam${Date.now()}`;
-    const samSent = await send(port, "POST", "/sign-in", null, { email: `sam${Date.now()}@example.com` });
+    const samEmail = `sam${Date.now()}@example.com`;
+    const samSent = await send(port, "POST", "/sign-in", null, { email: samEmail });
     const samMagic = samSent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
     const samSigned = await send(port, "GET", samMagic, null);
     const sam = samSigned.cookie;
@@ -354,9 +357,32 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(joined.status, 303);
     await send(port, "POST", "/session/offer", cookie, { invite: freshInvite, displayName: samName });
     const samLive = await send(port, "GET", sessionPath(freshInvite), sam);
-    assert.match(playerStatus(samLive.body), new RegExp(`<li>${displayName} pending</li>`));
+    assert.match(playerStatus(samLive.body), new RegExp(`${displayName} pending`));
+    assert.match(playerStatus(samLive.body), /action="\/session\/decline"/);
     const adaLive = await send(port, "GET", sessionPath(freshInvite), cookie);
-    assert.match(playerStatus(adaLive.body), new RegExp(`<li>${samName}</li>`));
+    assert.match(playerStatus(adaLive.body), new RegExp(`<li class="ink-0"><span class="who">${displayName} <span class="letters">0</span></span></li>`));
+    assert.match(playerStatus(adaLive.body), new RegExp(`<span class="who">${samName} <span class="letters">0</span></span>`));
+    assert.match(playerStatus(adaLive.body), /title="Offer friendship"/);
+    await send(port, "POST", "/session/select", cookie, { invite: freshInvite, index: "0" });
+    await send(port, "POST", "/session/select", sam, { invite: freshInvite, index: "2" });
+    const adaShades = await send(port, "GET", sessionPath(freshInvite), cookie);
+    const samShades = await send(port, "GET", sessionPath(freshInvite), sam);
+    assert.match(adaShades.body, /<td class="selected ink-0">/);
+    assert.match(adaShades.body, /<td class="ink-1">/);
+    assert.match(samShades.body, /<td class="ink-0">/);
+    assert.match(samShades.body, /<td class="selected ink-1">/);
+    await send(port, "POST", "/session/letter", cookie, { invite: freshInvite, letter: "A" });
+    await send(port, "POST", "/session/letter", sam, { invite: freshInvite, letter: "A" });
+    const counted = await send(port, "GET", sessionPath(freshInvite), cookie);
+    assert.match(playerStatus(counted.body), new RegExp(`<span class="who">${displayName} <span class="letters">1</span></span></li>`));
+    assert.match(playerStatus(counted.body), new RegExp(`<span class="who">${samName} <span class="letters">1</span></span>`));
+    assert.match(playerStatus(counted.body), /title="Offer friendship"/);
+    await send(port, "POST", "/session/offer", sam, { invite: freshInvite, displayName });
+    const friends = await send(port, "GET", sessionPath(freshInvite), cookie);
+    assert.match(playerStatus(friends.body), /<span class="bond friends" title="Friends">♥<\/span>/);
+    assert.match(playerStatus(friends.body), new RegExp(`<button type="submit" class="plain">${samName}</button>`));
+    assert.match(playerStatus(friends.body), new RegExp(`name="email" value="${samEmail}"`));
+    assert.equal(playerStatus(friends.body).includes("Offer friendship"), false);
 
     const publishedTitle = `Page${Date.now()}`;
     const crossword = {

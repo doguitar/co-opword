@@ -115,7 +115,7 @@ function libraryRows(squares: string[], size: number): string {
   return rows.join("");
 }
 
-const inkCount = 6;
+const inkCount = 12;
 
 function inkClass(index: number): string {
   return `ink-${((index % inkCount) + inkCount) % inkCount}`;
@@ -153,18 +153,21 @@ function sessionRows(
     const cells = squares.slice(row * size, (row + 1) * size).map((square, column) => {
       if (square.block) return fill("controls/cell-block.html");
       const index = row * size + column;
-      const shade = square.present.flatMap((name) => {
-        const playerIndex = players.findIndex((player) => (player.displayName ?? "") === name);
-        if (playerIndex < 0) return [];
-        return playerIndex === myIndex ? ["selected", inkClass(playerIndex)] : [`guest-${inkClass(playerIndex)}`];
-      });
+      const myName = myIndex >= 0 ? (players[myIndex]?.displayName ?? "") : "";
+      const occupant = myName !== "" && square.present.includes(myName)
+        ? myIndex
+        : players.findIndex((player) => {
+            const name = player.displayName ?? "";
+            return name !== "" && square.present.includes(name);
+          });
+      const shade = occupant < 0 ? [] : occupant === myIndex ? ["selected", inkClass(occupant)] : [inkClass(occupant)];
       if (index === rejected) shade.push("reject");
       return fill("controls/cell-session.html", {
         shade: shade.join(" "),
         index: String(index),
         number: numbers.get(index) ?? "",
         letter: square.letter ?? "",
-        focus: shade.includes("selected") ? "autofocus" : "",
+        focus: "",
       });
     });
     rows.push(fill("controls/row.html", { cells: cells.join("") }, ["cells"]));
@@ -469,7 +472,11 @@ const server = createServer(async (request, response) => {
       const link = `/join?invite=${encodeURIComponent(opened.invite)}`;
       const alertItems = coOpword
         .sessionAlerts({ token }, invite)
-        .map((alert) => fill("controls/alert.html", { displayName: alert.displayName ?? "", kind: alert.kind }))
+        .map((alert) => {
+          const displayName = alert.displayName ?? "";
+          const reply = alert.kind === "pending" ? fill("controls/decline.html", { invite: opened.invite, displayName }) : "";
+          return fill("controls/alert.html", { displayName, kind: alert.kind, reply }, ["reply"]);
+        })
         .join("");
       const alerts = alertItems === "" ? "" : fill("controls/alerts.html", { items: alertItems }, ["items"]);
       const me = coOpword.whoAmI({ token });
@@ -477,9 +484,33 @@ const server = createServer(async (request, response) => {
       const selected = opened.squares.findIndex((square) => myIndex >= 0 && square.present.includes(me.displayName ?? ""));
       const rejectedParam = url.searchParams.get("reject");
       const rejected = rejectedParam === null || rejectedParam === "" ? -1 : Number(rejectedParam);
+      const knownFriends = coOpword.friends({ token });
+      const friendNames = new Set(knownFriends.map((friend) => friend.displayName));
+      const friendInvites = knownFriends
+        .filter((friend) => friend.displayName !== null && friend.email !== "")
+        .map((friend) =>
+          fill("controls/invite-friend.html", {
+            invite: opened.invite,
+            displayName: friend.displayName ?? "",
+            email: friend.email,
+          }),
+        )
+        .join("");
       const players = opened.players
-        .filter((player) => player.displayName !== null && player.displayName !== me.displayName)
-        .map((player) => fill("controls/player.html", { displayName: player.displayName ?? "" }))
+        .map((player, index) => {
+          const displayName = player.displayName ?? "";
+          const bond = index === myIndex
+            ? ""
+            : friendNames.has(displayName)
+              ? fill("controls/friend-heart.html")
+              : fill("controls/friend-offer.html", { invite: opened.invite, displayName });
+          return fill("controls/session-player.html", {
+            ink: inkClass(index),
+            displayName,
+            letters: String(player.letters),
+            bond,
+          }, ["bond"]);
+        })
         .join("");
       send(
         response,
@@ -493,11 +524,14 @@ const server = createServer(async (request, response) => {
               link,
               puzzle: fill("controls/puzzle.html", { rows: sessionRows(opened.squares, opened.size, clueStarts(opened.words, opened.size), opened.players, myIndex, rejected) }, ["rows"]),
               clues: sessionClues(opened.words, opened.size, selected, myIndex < 0 ? "" : `lit ${inkClass(myIndex)}`),
-              management: fill("controls/session-management.html", { invite: opened.invite }),
-              playersSection: fill("controls/player-status.html", { invite: opened.invite, players, alerts }, ["players", "alerts"]),
+              playersSection: fill(
+                "controls/player-status.html",
+                { invite: opened.invite, link, players, alerts, friendInvites },
+                ["players", "alerts", "friendInvites"],
+              ),
               selected: selected < 0 ? "" : String(selected),
             },
-            ["puzzle", "clues", "management", "playersSection"],
+            ["puzzle", "clues", "playersSection"],
           ),
         ),
       );

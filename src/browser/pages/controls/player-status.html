@@ -1,11 +1,15 @@
 <section class="player-status">
-  <h2>Player Status</h2>
-  <ul>{{players}}</ul>
-  <form method="post" action="/session/offer">
-    <input type="hidden" name="invite" value="{{invite}}">
-    <label>Display name <input name="displayName"></label>
-    <button type="submit" class="plain">Offer friendship</button>
-    <button type="submit" class="plain" formaction="/session/decline">Decline</button>
-  </form>
+  <ul class="roster">{{players}}<li class="invite"><button type="button" class="plain" id="open-invite">Invite</button></li></ul>
   {{alerts}}
+  <dialog id="invite-players">
+    <ul class="invite-friends">{{friendInvites}}</ul>
+    <form method="post" action="/session/invite">
+      <input type="hidden" name="invite" value="{{invite}}">
+      <label>Email <input name="email" type="email" required></label>
+      <button type="submit" class="filled">Invite Player</button>
+    </form>
+    <p><button type="button" class="plain" id="copy-invite" data-invite-link="{{link}}">Invite Link</button></p>
+    <p class="toast" id="invite-copied" role="status">Copied</p>
+    <button type="button" class="plain" id="close-invite">Cancel</button>
+  </dialog>
 </section>

@@ -1,5 +1,3 @@
-<h1>{{title}}</h1>
-<p>Invite <code>{{invite}}</code> <a href="{{link}}">{{link}}</a></p>
 <form id="select-square" method="post" action="/session/select">
   <input type="hidden" name="invite" value="{{invite}}">
 </form>
@@ -12,13 +10,15 @@
   <input type="hidden" name="index" value="{{selected}}">
 </form>
 <div class="session">
+  <h1>{{title}}</h1>
   <div class="session-column">
-    {{puzzle}}
+    <div class="puzzle-block">
+      {{puzzle}}
+    </div>
     {{playersSection}}
   </div>
   <div class="session-column">
     {{clues}}
-    {{management}}
   </div>
 </div>
-<script src="/session.js?v=4"></script>
+<script src="/session.js?v=8"></script>
