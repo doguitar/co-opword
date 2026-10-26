@@ -759,6 +759,48 @@ body:has(.session) {
   text-align: center;
 }
 
+.spread .leaf:has(.column) > main {
+  align-self: center;
+  width: min(100%, 45%);
+  max-width: none;
+}
+
+.spread .column {
+  width: 100%;
+}
+
+.spread .column h1 {
+  margin: 0 0 1rem;
+  text-align: center;
+  font-size: clamp(1.6rem, 4vh, 2.4rem);
+}
+
+.spread .library ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.spread .library li {
+  border-bottom: 1px solid #111;
+}
+
+.spread .library a {
+  display: block;
+  padding: 0.6rem 0;
+  color: #111;
+  font-size: clamp(1.2rem, 3vh, 1.8rem);
+}
+
+.spread .leaf:has(.column) > footer {
+  width: 100%;
+  max-width: none;
+  margin-top: auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid #111;
+  text-align: center;
+}
+
 .spread .leaf:has(.notice) > main {
   align-self: center;
   align-items: center;

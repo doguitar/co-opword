@@ -311,7 +311,7 @@ const server = createServer(async (request, response) => {
           .library(session)
           .map((crossword) => fill("controls/library-item.html", { href: `/crossword?title=${encodeURIComponent(crossword.title)}`, title: crossword.title }))
           .join("");
-        send(response, 200, fill("library.html", { items }, ["items"]));
+        send(response, 200, frame(fill("library.html", { items }, ["items"])));
         return;
       }
       const opened = coOpword.openLibraryCrossword(session, url.searchParams.get("title") ?? "");
