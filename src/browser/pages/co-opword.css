@@ -860,6 +860,24 @@ body:has(.session) {
   text-align: center;
 }
 
+.spread .publish textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 12rem;
+  font: inherit;
+  color: #111;
+  background: #fff;
+  border: 1px solid #111;
+  border-radius: 0;
+  padding: 0.35rem 0.45rem;
+}
+
+.spread .publish button.filled {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: clamp(2.75rem, 7.55vh, 4.75rem);
+}
+
 .spread .leaf:has(.notice) > main {
   align-self: center;
   align-items: center;

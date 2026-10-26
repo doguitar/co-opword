@@ -271,6 +271,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
       assert.equal(unchanged.body.includes("Game"), false);
       if (path === "/") assert.match(unchanged.body, /<section class="home">/);
       if (path === "/library") assert.match(unchanged.body, /<section class="column library">/);
+      if (path === "/publish") assert.match(unchanged.body, /<section class="column publish">/);
     }
 
     const first = await send(port, "GET", "/crossword?title=First%20Row", cookie);

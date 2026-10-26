@@ -343,7 +343,7 @@ const server = createServer(async (request, response) => {
       return;
     }
     const me = coOpword.whoAmI({ token });
-    send(response, 200, fill("publish.html", { author: me.displayName ?? "" }));
+    send(response, 200, frame(fill("publish.html", { author: me.displayName ?? "" })));
     return;
   }
 
