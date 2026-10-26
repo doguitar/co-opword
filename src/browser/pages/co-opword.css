@@ -709,6 +709,56 @@ body:has(.session) {
   text-align: center;
 }
 
+.spread .leaf:has(.home) > main {
+  align-self: center;
+  width: min(100%, 45%);
+  max-width: none;
+}
+
+.spread .home {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+  font-size: clamp(1.35rem, 4.4vh, 2.2rem);
+}
+
+.spread .home h2,
+.spread .home p,
+.spread .home ul {
+  margin: 0;
+}
+
+.spread .home h2 {
+  font-size: 1em;
+  text-align: center;
+}
+
+.spread .home .ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.spread .home a {
+  color: #111;
+}
+
+.spread form[action="/display-name"] button.filled {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: clamp(2.75rem, 7.55vh, 4.75rem);
+}
+
+.spread .leaf:has(.home) > footer {
+  width: 100%;
+  max-width: none;
+  margin-top: auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid #111;
+  text-align: center;
+}
+
 .spread .leaf:has(.notice) > main {
   align-self: center;
   align-items: center;

@@ -235,7 +235,7 @@ const server = createServer(async (request, response) => {
     const token = readCookie(request, "player");
     const home = token ? signedIn({ token }) : undefined;
     if (home) {
-      send(response, 200, home);
+      send(response, 200, frame(home));
       return;
     }
     send(response, 200, frame(fill("sign-in.html")));
