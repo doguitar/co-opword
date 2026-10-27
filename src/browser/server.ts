@@ -230,6 +230,143 @@ function signedIn(session: PlayerSession): string | undefined {
   }
 }
 
+type BuiltWord = { direction: "across" | "down"; row: number; column: number; answer: string };
+
+function normalizeSquare(value: string): string {
+  const square = value.trim().toUpperCase();
+  if (square === "#") return "#";
+  if (/^[A-Z]$/.test(square)) return square;
+  return "";
+}
+
+function readSquares(params: URLSearchParams, size: number): string[] {
+  const posted = params.getAll("square").map(normalizeSquare);
+  if (posted.length === size * size) return posted;
+  return Array.from({ length: size * size }, () => "");
+}
+
+function wordsOn(squares: string[], size: number): BuiltWord[] {
+  const words: BuiltWord[] = [];
+  const white = (row: number, column: number) => squares[row * size + column] !== "#";
+  for (let row = 0; row < size; row++) {
+    let column = 0;
+    while (column < size) {
+      if (!white(row, column)) {
+        column += 1;
+        continue;
+      }
+      const start = column;
+      let answer = "";
+      let open = false;
+      while (column < size && white(row, column)) {
+        const letter = squares[row * size + column];
+        if (letter === "") open = true;
+        answer += letter;
+        column += 1;
+      }
+      if (column - start >= 2) words.push({ direction: "across", row, column: start, answer: open ? "" : answer });
+    }
+  }
+  for (let column = 0; column < size; column++) {
+    let row = 0;
+    while (row < size) {
+      if (!white(row, column)) {
+        row += 1;
+        continue;
+      }
+      const start = row;
+      let answer = "";
+      let open = false;
+      while (row < size && white(row, column)) {
+        const letter = squares[row * size + column];
+        if (letter === "") open = true;
+        answer += letter;
+        row += 1;
+      }
+      if (row - start >= 2) words.push({ direction: "down", row: start, column, answer: open ? "" : answer });
+    }
+  }
+  return words;
+}
+
+function wordKey(word: BuiltWord): string {
+  return `${word.direction}-${word.row}-${word.column}`;
+}
+
+function buildMain(fields: {
+  title: string;
+  author: string;
+  kind: "standard" | "freestyle";
+  size: number;
+  squares: string[];
+  words: BuiltWord[];
+  clues: Map<string, string>;
+  error: string;
+}): string {
+  const rows = [];
+  for (let row = 0; row < fields.size; row++) {
+    const cells = fields.squares
+      .slice(row * fields.size, (row + 1) * fields.size)
+      .map((value, column) => fill("controls/build-cell.html", { value, place: `Row ${row + 1} column ${column + 1}` }))
+      .join("");
+    rows.push(fill("controls/build-row.html", { cells }, ["cells"]));
+  }
+  const clues = fields.words
+    .map((word) =>
+      fill("controls/build-clue.html", {
+        label: `${word.direction === "across" ? "Across" : "Down"} ${word.row + 1},${word.column + 1}`,
+        clue: fields.clues.get(wordKey(word)) ?? "",
+        word: wordKey(word),
+      }),
+    )
+    .join("");
+  return fill(
+    "build.html",
+    {
+      title: fields.title,
+      author: fields.author,
+      size: String(fields.size),
+      freestyleSelected: fields.kind === "freestyle" ? "selected" : "",
+      standardSelected: fields.kind === "standard" ? "selected" : "",
+      rows: rows.join(""),
+      clues,
+      error: fields.error,
+    },
+    ["freestyleSelected", "standardSelected", "rows", "clues"],
+  );
+}
+
+function readBuild(body: URLSearchParams): {
+  title: string;
+  author: string;
+  kind: "standard" | "freestyle";
+  size: number;
+  squares: string[];
+  words: BuiltWord[];
+  clues: Map<string, string>;
+  intent: string;
+} {
+  const parsed = Number(body.get("size") ?? "");
+  const size = Number.isInteger(parsed) && parsed >= 9 && parsed <= 21 ? parsed : 15;
+  const kind = body.get("kind") === "standard" ? "standard" : "freestyle";
+  const squares = readSquares(body, size);
+  const words = wordsOn(squares, size);
+  const clues = new Map<string, string>();
+  const keys = body.getAll("word");
+  const texts = body.getAll("clue");
+  keys.forEach((key, index) => clues.set(key, texts[index] ?? ""));
+  return {
+    title: body.get("title") ?? "",
+    author: body.get("author") ?? "",
+    kind,
+    size,
+    squares,
+    words,
+    clues,
+    intent: body.get("intent") ?? "",
+  };
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   coOpword.noteTime(Date.now());
@@ -347,6 +484,67 @@ const server = createServer(async (request, response) => {
       );
     } catch {
       send(response, 404, message("That Crossword is not in the library."));
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/build") {
+    const token = readCookie(request, "player");
+    if (!token || !signedIn({ token })) {
+      send(response, 303, message("Sign in."), { location: "/" });
+      return;
+    }
+    const me = coOpword.whoAmI({ token });
+    const size = 15;
+    send(
+      response,
+      200,
+      frame(
+        buildMain({
+          title: "",
+          author: me.displayName ?? "",
+          kind: "freestyle",
+          size,
+          squares: Array.from({ length: size * size }, () => ""),
+          words: [],
+          clues: new Map(),
+          error: "",
+        }),
+      ),
+    );
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/build") {
+    const token = readCookie(request, "player");
+    if (!token || !signedIn({ token })) {
+      send(response, 303, message("Sign in."), { location: "/" });
+      return;
+    }
+    const built = readBuild(await readBody(request));
+    const show = (error: string) => send(response, 200, frame(buildMain({ ...built, error })));
+    if (built.intent !== "publish") {
+      show("");
+      return;
+    }
+    try {
+      const issued = coOpword.publishCrossword(
+        { token },
+        {
+          title: built.title,
+          kind: built.kind,
+          size: built.size,
+          squares: built.squares,
+          words: built.words.map((word) => ({ ...word, clue: built.clues.get(wordKey(word)) ?? "" })),
+        },
+        built.author,
+      );
+      await save();
+      deliverLink(withdrawOutboxPath, issued.email, issued.withdrawToken);
+      const href = `/withdraw?token=${encodeURIComponent(issued.withdrawToken)}`;
+      send(response, 200, messageLink(`A Withdraw link was sent to ${issued.email}.`, href, "Withdraw"));
+    } catch {
+      show("That Crossword cannot be published.");
     }
     return;
   }

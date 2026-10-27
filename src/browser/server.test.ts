@@ -45,14 +45,20 @@ async function startServer(port: number): Promise<ChildProcess> {
 
 type Reply = { status: number; body: string; location: string | null; cookie: string | null };
 
-async function send(port: number, method: string, path: string, cookie: string | null, body?: Record<string, string>): Promise<Reply> {
+async function send(
+  port: number,
+  method: string,
+  path: string,
+  cookie: string | null,
+  body?: Record<string, string> | URLSearchParams,
+): Promise<Reply> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method,
     headers: {
       ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}),
       ...(cookie ? { cookie } : {}),
     },
-    body: body ? new URLSearchParams(body) : undefined,
+    body: body ? (body instanceof URLSearchParams ? body : new URLSearchParams(body)) : undefined,
     redirect: "manual",
   });
   const setCookie = response.headers.getSetCookie().find((entry) => entry.startsWith("player="));
@@ -239,6 +245,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
       [
         ["/", "Home"],
         ["/library", "Library"],
+        ["/build", "Build"],
         ["/publish", "Publish"],
         ["/published", "Published"],
         ["/completions", "Completions"],
@@ -259,6 +266,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
       [
         ["/", "Home"],
         ["/library", "Library"],
+        ["/build", "Build"],
         ["/publish", "Publish"],
         ["/published", "Published"],
         ["/completions", "Completions"],
@@ -308,6 +316,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
       [
         ["/", "Home"],
         ["/library", "Library"],
+        ["/build", "Build"],
         ["/publish", "Publish"],
         ["/published", "Published"],
         ["/completions", "Completions"],
@@ -453,6 +462,40 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(published.body.includes("About Us"), false);
     assert.match(published.body, /<section class="crossword published-crossword">/);
     assert.equal(published.body.includes("Game"), false);
+
+    const build = await send(port, "GET", "/build", cookie);
+    assert.equal(build.status, 200);
+    assert.equal(build.body.split('name="square"').length - 1, 225);
+    assert.match(build.body, new RegExp(`name="author" value="${displayName}"`));
+    const builtTitle = `Built${Date.now()}`;
+    const squares = Array.from({ length: 81 }, () => "#");
+    squares[0] = "C";
+    squares[1] = "A";
+    squares[2] = "T";
+    squares[9] = "A";
+    squares[18] = "R";
+    const form = new URLSearchParams();
+    form.set("title", builtTitle);
+    form.set("author", displayName);
+    form.set("kind", "freestyle");
+    form.set("size", "9");
+    for (const square of squares) form.append("square", square);
+    form.append("word", "across-0-0");
+    form.append("clue", "A pet");
+    form.append("word", "down-0-0");
+    form.append("clue", "An automobile");
+    form.set("intent", "publish");
+    const built = await send(port, "POST", "/build", cookie, form);
+    assert.equal(built.status, 200);
+    assert.match(built.body, /A Withdraw link was sent/);
+    const builtPage = await send(
+      port,
+      "GET",
+      `/published-crossword?title=${encodeURIComponent(builtTitle)}&author=${encodeURIComponent(displayName)}`,
+      cookie,
+    );
+    assert.match(builtPage.body, /A pet/);
+    assert.match(builtPage.body, /An automobile/);
   } finally {
     if (child.exitCode === null) {
       child.kill();

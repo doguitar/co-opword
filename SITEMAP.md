@@ -36,6 +36,14 @@ Reached from: Library.
 
 Goes to: Session, Library.
 
+## Build
+
+`GET /build`. The signed-in Player sets a title, an Author, Freestyle or Standard, and a size from 9 to 21. Each Square is one letter or `#` for a block. Update grid lists a clue field for every Word of two or more Squares. Publish posts that Crossword through the same rules as Publish. A success shows the Withdraw link. A rejected Crossword stays on Build with the error.
+
+Reached from: the menu.
+
+Goes to: Withdraw, from a successful Publish only.
+
 ## Publish
 
 `GET /publish`. The signed-in Player submits an Author and Crossword JSON. A successful post stays on a confirmation that names the email and links to Withdraw. A rejected Crossword stays on an error with no link.

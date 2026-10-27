@@ -56,6 +56,7 @@ Then, in order:
 3. Match the Grid. Select sets the Square from the index field. Type writes the letter onto that selected Square, not onto the index. For squares 0 through 8, Select, then Type `A`. The last Type opens `/match`.
 4. Completions, then Publish. Publish the same nine-A Freestyle Crossword as title Tiny and Author Ada. Open Published, then that Published Crossword.
 5. About, then Support.
+6. Build. The grid is empty and the Author is Relay.
 
 Close the relay tab with `browser.close(name="coopword")`. The memory server holds no snapshot file.
 
@@ -65,6 +66,7 @@ Close the relay tab with `browser.close(name="coopword")`. The memory server hol
 | Home | `/` after a display name is set | `regression/home.png` |
 | Library | `/library` | `regression/library.png` |
 | Crossword | `/crossword?title=` for one Library Crossword | `regression/crossword.png` |
+| Build | `/build` | `regression/build.png` |
 | Publish | `/publish` | `regression/publish.png` |
 | Published | `/published` | `regression/published.png` |
 | Published Crossword | `/published-crossword` for one published title and Author | `regression/published-crossword.png` |

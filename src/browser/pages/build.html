@@ -1,0 +1,16 @@
+<form class="build" method="post" action="/build">
+  <label>Title <input name="title" value="{{title}}" required></label>
+  <label>Author <input name="author" value="{{author}}"></label>
+  <label>Kind
+    <select name="kind">
+      <option value="freestyle" {{freestyleSelected}}>Freestyle</option>
+      <option value="standard" {{standardSelected}}>Standard</option>
+    </select>
+  </label>
+  <label>Size <input name="size" type="number" min="9" max="21" value="{{size}}" required></label>
+  <table class="grid">{{rows}}</table>
+  <div class="clues">{{clues}}</div>
+  <p>{{error}}</p>
+  <button type="submit" name="intent" value="layout">Update grid</button>
+  <button type="submit" class="filled" name="intent" value="publish">Publish</button>
+</form>
