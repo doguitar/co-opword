@@ -2,7 +2,7 @@
 
 Player-facing pages only. A partial (`cell.html`, `clue.html`, and the other fragments) is not a page. A route that only redirects is listed under the page it lands on.
 
-A signed-out request to any page except Sign in and Withdraw is sent to Sign in.
+A signed-out request to any page except Sign in and Revise is sent to Sign in.
 
 ## Sign in
 
@@ -38,41 +38,33 @@ Goes to: Session, Library.
 
 ## Build
 
-`GET /build`. The signed-in Player sets a title, an Author, Freestyle or Standard, and a size from 9 to 21. Each Square is one letter or `#` for a block. Update grid lists a clue field for every Word of two or more Squares. Publish posts that Crossword through the same rules as Publish. A success shows the Withdraw link. A rejected Crossword stays on Build with the error.
+`GET /build`. The signed-in Player sets a title, an Author, Freestyle or Standard, and a size from 9 to 21. Each Square is one letter or `#` for a block. Update grid lists a clue field for every Word of two or more Squares. An optional address emails the Revise link and is not stored. Publish posts that Crossword through the same rules as Publish. A success shows the Revise link. `GET /build?token=...` opens Revise. A rejected Crossword stays on Build with the error.
 
-Reached from: the menu.
+Reached from: the menu, or Revise.
 
-Goes to: Withdraw, from a successful Publish only.
+Goes to: Revise, from a successful Publish or a successful revision.
 
 ## Publish
 
-`GET /publish`. The signed-in Player submits an Author and Crossword JSON. A successful post stays on a confirmation that names the email and links to Withdraw. A rejected Crossword stays on an error with no link.
+`GET /publish`. The signed-in Player submits an Author and Crossword JSON, and may type an address to email the Revise link. That address is not stored. A successful post stays on a confirmation that links to Revise and names the address only when one was typed. A rejected Crossword stays on an error with no link.
 
 Reached from: Home.
 
-Goes to: Withdraw, from the confirmation only.
+Goes to: Revise, from the confirmation only.
 
-## Withdraw
+## Revise
 
-`GET /withdraw?token=...`. Takes that published Crossword off the public list, or says the link cannot. The same link is written to `data/withdraw-outbox.jsonl`.
+`GET /revise?token=...`. The holder sees the builder filled with the current version and may save a new version or delete it. The Published list shows only the newest version. A Session already started stays on its version. Delete takes the newest version off the public list so no new Session can be started from it. An optional email at creation is written to `data/withdraw-outbox.jsonl` and is not stored on the Crossword. `GET /withdraw?token=...` opens this page.
 
-Reached from: the Publish confirmation, or the withdraw outbox.
+Reached from: the Publish confirmation, Build after a revision, or the outbox.
 
-Goes to: nowhere. The result is a message with no link.
+Goes to: Build, or a message after Delete.
 
 ## Published
 
-`GET /published`. Lists published Crosswords. Each item links to `/published-crossword?title=...&author=...`.
+`GET /published`. Lists published Crosswords. Each item starts a Session with that title and Author.
 
 Reached from: Home.
-
-Goes to: Published Crossword. This page has no link back.
-
-## Published Crossword
-
-`GET /published-crossword?title=...&author=...`. Shows the title, the Author (a blank Author reads "no Author"), and the Word count. Start a Session posts `/session` with the title and Author. An unpublished pair is a not-found message.
-
-Reached from: Published.
 
 Goes to: Session. This page has no link back.
 
@@ -80,7 +72,7 @@ Goes to: Session. This page has no link back.
 
 `GET /session?invite=...`. The live Session: Invite code, join link, Grid, clues, Type, Select, Clear, Close, email Invite, Offer friendship, and Decline. Those posts return here, except Close and a letter that makes the Grid match.
 
-Reached from: Crossword, Published Crossword, Join, and the magic link when the token carries an Invite.
+Reached from: Crossword, Published, Join, and the magic link when the token carries an Invite.
 
 Goes to: this Session (Type, Select, Clear, Invite, Offer, Decline), Home (Close), Match (the Grid matched), Completions, and Join (the invite link).
 

@@ -273,7 +273,8 @@ test("a Player publishes a finished Crossword, and the Withdraw link only takes 
   coOpword.admitLibraryCrossword(tinyCrossword);
 
   const issued = coOpword.publishCrossword(ada, tinyCrossword, "");
-  assert.equal(issued.email, "ada@example.com");
+  assert.equal("email" in issued, false);
+  assert.equal(JSON.parse(coOpword.snapshot()).published.some((item: { email?: string; playerId?: string }) => item.email !== undefined || item.playerId !== undefined), false);
   assert.deepEqual(coOpword.published(ada), [{ title: "Tiny", author: "" }]);
 
   const opened = coOpword.openPublishedCrossword(ada, "Tiny", "");
@@ -284,6 +285,18 @@ test("a Player publishes a finished Crossword, and the Withdraw link only takes 
 
   const kept = openCoOpword(coOpword.snapshot());
   assert.deepEqual(kept.published(ada), [{ title: "Tiny", author: "" }]);
+
+  const original = kept.startPublishedSession(ada, "Tiny", "");
+  assert.equal(kept.openSession(ada, original.invite).words[0].clue, "Nine As");
+  const revised = { ...tinyCrossword, words: [{ ...tinyCrossword.words[0], clue: "Eight As" }] };
+  assert.equal(kept.reviseCrossword(issued.withdrawToken, revised, "Ada"), 2);
+  assert.equal(kept.openRevise(issued.withdrawToken).words[0].clue, "Eight As");
+  assert.equal(kept.openRevise(issued.withdrawToken).version, 2);
+  assert.equal(kept.openSession(ada, original.invite).words[0].clue, "Nine As");
+  assert.throws(() => kept.startPublishedSession(ada, "Tiny", ""));
+  const newest = kept.startPublishedSession(ada, "Tiny", "Ada");
+  assert.equal(kept.openSession(ada, newest.invite).words[0].clue, "Eight As");
+  assert.deepEqual(kept.published(ada), [{ title: "Tiny", author: "Ada" }]);
 
   kept.withdrawCrossword(issued.withdrawToken);
   assert.deepEqual(kept.published(ada), []);

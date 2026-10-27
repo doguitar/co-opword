@@ -5,12 +5,12 @@ A live crossword that several people fill on one shared grid.
 ## Language
 
 **Crossword**:
-A titled puzzle of crossing words on one grid, solved from clues. Every white Square holds one letter and sits in a Word. It is either in the library or published by a Player. Every published Crossword is on one list any Player can open; the library is a separate list. No two library Crosswords share a title. No two published Crosswords share the same title and Author; a blank Author counts. A library title may match a published title. Publishing sets an Author and does not keep a link to that Player. Letters, clues, title, and Author do not change after publish. Any Player may publish one.
+A titled puzzle of crossing words on one grid, solved from clues. Every white Square holds one letter and sits in a Word. It is either in the library or published by a Player. Every published Crossword is on one list any Player can open; the library is a separate list. No two library Crosswords share a title. No two published Crosswords share the same title and Author; a blank Author counts. A library title may match a published title. Publishing sets an Author and does not keep a link to that Player. Letters, clues, title, and Author change only through the Revise link. Any Player may publish one.
 _Avoid_: Puzzle, word search
 
-**Withdraw link**:
-The link emailed to the publishing Player when a Crossword is published. Whoever has it may take that Crossword off the public list, and that is all it can do. The Crossword does not remember the Player. A Session already started from it is unchanged. A Completion is unchanged.
-_Avoid_: Edit link, unpublish
+**Revise link**:
+The link shown when a Crossword is published. The creator may also type an address then, and only then is the link emailed. That address is not kept, and neither is which Player it belongs to. Whoever has the link may open the builder with that Crossword filled in, or delete it. Saving a change stores a new version and leaves the same link on the newest version. The Published list shows only that newest version. A Session already started stays on the version it started from and can continue. That earlier version cannot be started again. Delete takes the newest version off the public list so no new Session can be started from it. A Completion is unchanged.
+_Avoid_: Withdraw link, public edit page
 
 **Standard**:
 A Crossword on a 15×15 or 21×21 grid whose black Squares match under a half-turn, and whose every letter sits in both an Across Word and a Down Word.

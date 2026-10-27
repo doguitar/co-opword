@@ -302,6 +302,7 @@ function buildMain(fields: {
   words: BuiltWord[];
   clues: Map<string, string>;
   error: string;
+  token: string;
 }): string {
   const rows = [];
   for (let row = 0; row < fields.size; row++) {
@@ -331,8 +332,46 @@ function buildMain(fields: {
       rows: rows.join(""),
       clues,
       error: fields.error,
+      token: fields.token,
+      editEmail: fields.token === "" ? fill("controls/edit-email.html") : "",
     },
-    ["freestyleSelected", "standardSelected", "rows", "clues"],
+    ["freestyleSelected", "standardSelected", "rows", "clues", "editEmail"],
+  );
+}
+
+function reviseBuilder(
+  opened: {
+    title: string;
+    author: string;
+    kind: "standard" | "freestyle";
+    size: number;
+    squares: string[];
+    words: { direction: "across" | "down"; row: number; column: number; clue: string }[];
+    version: number;
+  },
+  token: string,
+): string {
+  const squares = opened.squares.map((square) => (square === "#" ? "#" : square));
+  const words = wordsOn(squares, opened.size);
+  const clues = new Map(opened.words.map((word) => [`${word.direction}-${word.row}-${word.column}`, word.clue]));
+  return fill(
+    "revise.html",
+    {
+      version: String(opened.version),
+      token,
+      form: buildMain({
+        title: opened.title,
+        author: opened.author,
+        kind: opened.kind,
+        size: opened.size,
+        squares,
+        words,
+        clues,
+        error: "",
+        token,
+      }),
+    },
+    ["form"],
   );
 }
 
@@ -345,6 +384,8 @@ function readBuild(body: URLSearchParams): {
   words: BuiltWord[];
   clues: Map<string, string>;
   intent: string;
+  token: string;
+  editEmail: string;
 } {
   const parsed = Number(body.get("size") ?? "");
   const size = Number.isInteger(parsed) && parsed >= 9 && parsed <= 21 ? parsed : 15;
@@ -364,7 +405,17 @@ function readBuild(body: URLSearchParams): {
     words,
     clues,
     intent: body.get("intent") ?? "",
+    token: body.get("token") ?? "",
+    editEmail: body.get("editEmail") ?? "",
   };
+}
+
+function reviseNotice(email: string, token: string): string {
+  const href = `/revise?token=${encodeURIComponent(token)}`;
+  const address = email.trim();
+  if (address !== "") deliverLink(withdrawOutboxPath, address, token);
+  const text = address === "" ? "A Revise link is ready." : `A Revise link was sent to ${address}.`;
+  return messageLink(text, href, "Revise");
 }
 
 const server = createServer(async (request, response) => {
@@ -489,6 +540,11 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/build") {
+    const reviseToken = url.searchParams.get("token");
+    if (reviseToken) {
+      send(response, 303, message("Revise"), { location: `/revise?token=${encodeURIComponent(reviseToken)}` });
+      return;
+    }
     const token = readCookie(request, "player");
     if (!token || !signedIn({ token })) {
       send(response, 303, message("Sign in."), { location: "/" });
@@ -509,6 +565,7 @@ const server = createServer(async (request, response) => {
           words: [],
           clues: new Map(),
           error: "",
+          token: "",
         }),
       ),
     );
@@ -516,33 +573,43 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/build") {
+    const built = readBuild(await readBody(request));
     const token = readCookie(request, "player");
-    if (!token || !signedIn({ token })) {
+    if (!built.token && (!token || !signedIn({ token }))) {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const built = readBuild(await readBody(request));
     const show = (error: string) => send(response, 200, frame(buildMain({ ...built, error })));
     if (built.intent !== "publish") {
       show("");
       return;
     }
+    const crossword = {
+      title: built.title,
+      kind: built.kind,
+      size: built.size,
+      squares: built.squares,
+      words: built.words.map((word) => ({ ...word, clue: built.clues.get(wordKey(word)) ?? "" })),
+    };
+    if (built.token) {
+      try {
+        const version = coOpword.reviseCrossword(built.token, crossword, built.author);
+        await save();
+        const href = `/revise?token=${encodeURIComponent(built.token)}`;
+        send(response, 200, messageLink(`That Crossword is now version ${version}.`, href, "Revise"));
+      } catch {
+        show("That Crossword cannot be published.");
+      }
+      return;
+    }
     try {
       const issued = coOpword.publishCrossword(
-        { token },
-        {
-          title: built.title,
-          kind: built.kind,
-          size: built.size,
-          squares: built.squares,
-          words: built.words.map((word) => ({ ...word, clue: built.clues.get(wordKey(word)) ?? "" })),
-        },
+        { token: token ?? "" },
+        crossword,
         built.author,
       );
       await save();
-      deliverLink(withdrawOutboxPath, issued.email, issued.withdrawToken);
-      const href = `/withdraw?token=${encodeURIComponent(issued.withdrawToken)}`;
-      send(response, 200, messageLink(`A Withdraw link was sent to ${issued.email}.`, href, "Withdraw"));
+      send(response, 200, reviseNotice(built.editEmail, issued.withdrawToken));
     } catch {
       show("That Crossword cannot be published.");
     }
@@ -571,9 +638,7 @@ const server = createServer(async (request, response) => {
       const crossword = JSON.parse(body.get("crossword") ?? "");
       const issued = coOpword.publishCrossword({ token }, crossword, body.get("author") ?? "");
       await save();
-      deliverLink(withdrawOutboxPath, issued.email, issued.withdrawToken);
-      const href = `/withdraw?token=${encodeURIComponent(issued.withdrawToken)}`;
-      send(response, 200, messageLink(`A Withdraw link was sent to ${issued.email}.`, href, "Withdraw"));
+      send(response, 200, reviseNotice(body.get("editEmail") ?? "", issued.withdrawToken));
     } catch {
       send(response, 400, message("That Crossword cannot be published."));
     }
@@ -581,12 +646,30 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/withdraw") {
+    const token = url.searchParams.get("token") ?? "";
+    send(response, 303, message("Revise"), { location: `/revise?token=${encodeURIComponent(token)}` });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/revise") {
     try {
-      coOpword.withdrawCrossword(url.searchParams.get("token") ?? "");
-      await save();
-      send(response, 200, message("That Crossword is off the public list."));
+      const token = url.searchParams.get("token") ?? "";
+      const opened = coOpword.openRevise(token);
+      send(response, 200, frame(reviseBuilder(opened, token)));
     } catch {
-      send(response, 400, message("That Withdraw link can only take a Crossword off the public list."));
+      send(response, 404, message("That Revise link is no longer valid."));
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/revise") {
+    const body = await readBody(request);
+    try {
+      coOpword.withdrawCrossword(body.get("token") ?? "");
+      await save();
+      send(response, 200, message("That Crossword is off the public list. New Sessions cannot be started from it."));
+    } catch {
+      send(response, 400, message("That Revise link is no longer valid."));
     }
     return;
   }
@@ -600,45 +683,22 @@ const server = createServer(async (request, response) => {
     const items = coOpword
       .published({ token })
       .map((crossword) => {
-        const href = `/published-crossword?title=${encodeURIComponent(crossword.title)}&author=${encodeURIComponent(crossword.author)}`;
-        return fill("controls/published-item.html", { href, title: crossword.title, author: crossword.author === "" ? "no Author" : crossword.author });
+        return fill(
+          "controls/published-item.html",
+          {
+            title: crossword.title,
+            titleValue: crossword.title,
+            author: crossword.author === "" ? "no Author" : crossword.author,
+            authorValue: crossword.author,
+          },
+          [],
+        );
       })
       .join("");
     send(response, 200, frame(fill("published.html", { items }, ["items"])));
     return;
   }
 
-  if (request.method === "GET" && url.pathname === "/published-crossword") {
-    const token = readCookie(request, "player");
-    if (!token) {
-      send(response, 303, message("Sign in."), { location: "/" });
-      return;
-    }
-    try {
-      const opened = coOpword.openPublishedCrossword({ token }, url.searchParams.get("title") ?? "", url.searchParams.get("author") ?? "");
-      send(
-        response,
-        200,
-        frame(
-          fill(
-          "published-crossword.html",
-          {
-            title: opened.title,
-            author: opened.author === "" ? "no Author" : opened.author,
-            authorValue: opened.author,
-            words: String(opened.words.length),
-            rows: libraryRows(opened.squares, opened.size),
-            clues: clues(opened.words),
-          },
-          ["rows", "clues"],
-        ),
-        ),
-      );
-    } catch {
-      send(response, 404, message("That Crossword is not published."));
-    }
-    return;
-  }
 
   if (request.method === "POST" && url.pathname === "/session") {
     const token = readCookie(request, "player");

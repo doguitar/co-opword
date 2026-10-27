@@ -447,21 +447,22 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     };
     const publishedPost = await send(port, "POST", "/publish", cookie, { author: displayName, crossword: JSON.stringify(crossword) });
     assert.equal(publishedPost.status, 200);
-    const published = await send(
-      port,
-      "GET",
-      `/published-crossword?title=${encodeURIComponent(publishedTitle)}&author=${encodeURIComponent(displayName)}`,
-      cookie,
-    );
+    assert.match(publishedPost.body, /A Revise link is ready/);
+    const publishedHref = publishedPost.body.match(/<a href="([^"]+)">Revise<\/a>/)?.[1] ?? "";
+    const published = await send(port, "GET", publishedHref, null);
     assert.equal(published.status, 200);
-    assert.match(published.body, new RegExp(`<h1>${publishedTitle}</h1>`));
-    assert.match(published.body, new RegExp(`<p>${displayName}</p>`));
-    assert.match(published.body, /<p>1 Words<\/p>/);
-    assert.match(published.body, /Start a Session/);
+    assert.match(published.body, new RegExp(`name="title" value="${publishedTitle}"`));
+    assert.match(published.body, new RegExp(`name="author" value="${displayName}"`));
+    assert.match(published.body, /Version 1/);
+    assert.match(published.body, /<button type="submit" name="intent" value="delete">Delete<\/button>/);
+    assert.equal(published.body.includes("Start a Session"), false);
     assert.equal(published.body.includes("<summary>Menu</summary>"), false);
     assert.equal(published.body.includes("About Us"), false);
-    assert.match(published.body, /<section class="crossword published-crossword">/);
+    assert.match(published.body, /<section class="column revise">/);
     assert.equal(published.body.includes("Game"), false);
+    const listed = await send(port, "GET", "/published", cookie);
+    assert.match(listed.body, new RegExp(`${publishedTitle}`));
+    assert.match(listed.body, /Start a Session/);
 
     const build = await send(port, "GET", "/build", cookie);
     assert.equal(build.status, 200);
@@ -485,15 +486,12 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     form.append("word", "down-0-0");
     form.append("clue", "An automobile");
     form.set("intent", "publish");
+    form.set("editEmail", "editor@example.com");
     const built = await send(port, "POST", "/build", cookie, form);
     assert.equal(built.status, 200);
-    assert.match(built.body, /A Withdraw link was sent/);
-    const builtPage = await send(
-      port,
-      "GET",
-      `/published-crossword?title=${encodeURIComponent(builtTitle)}&author=${encodeURIComponent(displayName)}`,
-      cookie,
-    );
+    assert.match(built.body, /A Revise link was sent to editor@example.com/);
+    const builtHref = built.body.match(/<a href="([^"]+)">Revise<\/a>/)?.[1] ?? "";
+    const builtPage = await send(port, "GET", builtHref, null);
     assert.match(builtPage.body, /A pet/);
     assert.match(builtPage.body, /An automobile/);
   } finally {
@@ -551,42 +549,46 @@ test("a signed-in Player sees the Grid and Words of a published Freestyle Crossw
       ]).flat(),
     };
 
-    assert.equal((await send(port, "POST", "/publish", cookie, { author: "", crossword: JSON.stringify(blankCrossword) })).status, 200);
-    assert.equal((await send(port, "POST", "/publish", cookie, { author: "Ada", crossword: JSON.stringify(namedCrossword) })).status, 200);
-    assert.equal((await send(port, "POST", "/publish", cookie, { author: "Ada", crossword: JSON.stringify(standardCrossword) })).status, 200);
+    const blankPost = await send(port, "POST", "/publish", cookie, { author: "", crossword: JSON.stringify(blankCrossword) });
+    const namedPost = await send(port, "POST", "/publish", cookie, { author: "Ada", crossword: JSON.stringify(namedCrossword) });
+    const standardPost = await send(port, "POST", "/publish", cookie, { author: "Ada", crossword: JSON.stringify(standardCrossword) });
+    assert.equal(blankPost.status, 200);
+    assert.equal(namedPost.status, 200);
+    assert.equal(standardPost.status, 200);
+    const hrefOf = (body: string) => body.match(/<a href="([^"]+)">Revise<\/a>/)?.[1] ?? "";
 
-    const blank = await send(port, "GET", `/published-crossword?title=${encodeURIComponent(title)}&author=`, cookie);
+    const blank = await send(port, "GET", hrefOf(blankPost.body), null);
     assert.equal(blank.status, 200);
-    assert.match(blank.body, new RegExp(`<h1>${title}</h1>`));
-    assert.match(blank.body, /<p>no Author<\/p>/);
-    assert.match(
-      blank.body,
-      /<table class="grid">\s*<tr>\s*<td>C<\/td>\s*<td>A<\/td>\s*<td>T<\/td>(?:\s*<td class="block"><\/td>){6}\s*<\/tr>\s*<tr>\s*<td>D<\/td>\s*<td>O<\/td>\s*<td>G<\/td>(?:\s*<td class="block"><\/td>){6}\s*<\/tr>(?:\s*<tr>(?:\s*<td class="block"><\/td>){9}\s*<\/tr>){7}\s*<\/table>/,
-    );
-    assert.match(blank.body, /<ul>\s*<li>across 3: Feline<\/li>\s*<li>across 3: Hound<\/li>\s*<\/ul>/);
-    assert.match(blank.body, /<p>2 Words<\/p>/);
-    assert.match(blank.body, new RegExp(`<input type="hidden" name="title" value="${title}">`));
-    assert.match(blank.body, /<input type="hidden" name="author" value="">/);
+    assert.match(blank.body, new RegExp(`name="title" value="${title}"`));
+    assert.match(blank.body, /name="author" value=""/);
+    assert.match(blank.body, /value="C"/);
+    assert.match(blank.body, /value="A"/);
+    assert.match(blank.body, /value="T"/);
+    assert.match(blank.body, /value="D"/);
+    assert.match(blank.body, /value="O"/);
+    assert.match(blank.body, /value="G"/);
+    assert.match(blank.body, /value="#"/);
+    assert.match(blank.body, /value="Feline"/);
+    assert.match(blank.body, /value="Hound"/);
+    assert.match(blank.body, /Version 1/);
     assert.equal(blank.body.includes('value="no Author"'), false);
-    assert.match(blank.body, /<button type="submit" class="filled">Start a Session<\/button>/);
+    assert.equal(blank.body.includes("Start a Session"), false);
+    assert.match(blank.body, /<button type="submit" name="intent" value="delete">Delete<\/button>/);
 
-    const named = await send(port, "GET", `/published-crossword?title=${encodeURIComponent(title)}&author=${encodeURIComponent("Ada")}`, cookie);
+    const named = await send(port, "GET", hrefOf(namedPost.body), null);
     assert.equal(named.status, 200);
-    assert.match(named.body, /<p>Ada<\/p>/);
-    assert.match(named.body, /<table class="grid">\s*<tr>(?:\s*<td>A<\/td>){9}\s*<\/tr>(?:\s*<tr>(?:\s*<td class="block"><\/td>){9}\s*<\/tr>){8}\s*<\/table>/);
-    assert.match(named.body, /<ul>\s*<li>across 9: Nine As<\/li>\s*<\/ul>/);
-    assert.match(named.body, /<p>1 Words<\/p>/);
-    assert.match(named.body, /<input type="hidden" name="author" value="Ada">/);
-
-    const standard = await send(port, "GET", `/published-crossword?title=${encodeURIComponent(standardTitle)}&author=${encodeURIComponent("Ada")}`, cookie);
+    assert.match(named.body, /name="author" value="Ada"/);
+    assert.match(named.body, /value="Nine As"/);
+    const standard = await send(port, "GET", hrefOf(standardPost.body), null);
     assert.equal(standard.status, 200);
-    assert.match(standard.body, new RegExp(`<h1>${standardTitle}</h1>`));
-    assert.match(standard.body, /<table class="grid">(?:\s*<tr>(?:\s*<td>A<\/td>){15}\s*<\/tr>){15}\s*<\/table>/);
-    assert.equal(standard.body.includes('class="block"'), false);
-    assert.match(standard.body, /<ul>\s*<li>across 15: Across 1<\/li>\s*<li>down 15: Down 1<\/li>\s*<li>across 15: Across 2<\/li>/);
-    assert.match(standard.body, /<li>across 15: Across 15<\/li>\s*<li>down 15: Down 15<\/li>\s*<\/ul>/);
-    assert.match(standard.body, /<p>30 Words<\/p>/);
-    assert.match(standard.body, /<p>Ada<\/p>/);
+    assert.match(standard.body, new RegExp(`name="title" value="${standardTitle}"`));
+    assert.match(standard.body, /value="A"/);
+    assert.equal(standard.body.includes('value="#"'), false);
+    assert.match(standard.body, /value="Across 1"/);
+    assert.match(standard.body, /value="Down 1"/);
+    assert.match(standard.body, /value="Across 15"/);
+    assert.match(standard.body, /value="Down 15"/);
+    assert.match(standard.body, /name="author" value="Ada"/);
 
     const started = await send(port, "POST", "/session", cookie, { title, author: "" });
     assert.equal(started.status, 303);

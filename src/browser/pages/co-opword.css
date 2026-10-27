@@ -831,8 +831,7 @@ body:has(.session) {
   color: #111;
 }
 
-.spread .published-crossword .clues,
-.spread .published-crossword ul {
+.spread .revise ul {
   margin: 1rem 0;
   padding: 0;
   list-style: none;
