@@ -109,11 +109,23 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     const signed = await send(port, "GET", magic, null);
     const cookie = signed.cookie;
     assert.ok(cookie);
+    const unnamed = await send(port, "GET", "/", cookie);
+    assert.match(unnamed.body, /<button type="submit" class="filled">Choose<\/button>/);
     await send(port, "POST", "/display-name", cookie, { displayName });
+    const idleHome = await send(port, "GET", "/", cookie);
+    assert.match(idleHome.body, /<h2>Sessions<\/h2>/);
+    assert.match(idleHome.body, /No open sessions\. <a href="\/published">Start one from a published crossword\.<\/a>/);
+    assert.match(idleHome.body, new RegExp(`<p>Welcome back, ${displayName}</p>`));
+    assert.equal(idleHome.body.includes("Other players"), false);
+    assert.equal(idleHome.body.includes("Rename"), false);
+    assert.equal(idleHome.body.includes('action="/display-name"'), false);
     const started = await send(port, "POST", "/session", cookie, { title: "First Row" });
     const invite = new URL(started.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
     assert.equal(started.status, 303);
     assert.equal(started.location, sessionPath(invite));
+    const busyHome = await send(port, "GET", "/", cookie);
+    assert.equal(busyHome.body.includes(`<a href="${sessionPath(invite)}">First Row</a>`), true);
+    assert.equal(busyHome.body.includes("No open sessions."), false);
 
     const opened = await send(port, "GET", sessionPath(invite), cookie);
     assert.equal(opened.status, 200);

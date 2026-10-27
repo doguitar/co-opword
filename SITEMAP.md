@@ -14,11 +14,11 @@ Goes to: Home or a Session, after the magic link.
 
 ## Home
 
-`GET /` for a signed-in Player. Shows the display name, the control to set or change it, and other Players. Posting `/display-name` returns here.
+`GET /` for a signed-in Player. Greets a Player who has a display name with "Welcome back, " and that name, shows the control to set a name when the Player has none, and the live Sessions that Player is in. Each Session links to `/session?invite=...`. When there are none, Home links to Published and says to start one from a published crossword. Posting `/display-name` returns here.
 
 Reached from: the magic link when it has no Invite, Library, Completions, and Close on a Session.
 
-Goes to: Library, Publish, Published.
+Goes to: an open Session, or Published when there is none.
 
 ## Library
 

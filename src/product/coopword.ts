@@ -118,6 +118,7 @@ export type CoOpword = {
   startSession(session: PlayerSession, title: string): { invite: string };
   joinSession(session: PlayerSession, invite: string): { invite: string };
   openSession(session: PlayerSession, invite: string): OpenedSession;
+  openSessions(session: PlayerSession): { invite: string; title: string }[];
   selectSquare(session: PlayerSession, invite: string, index: number): void;
   typeLetter(session: PlayerSession, invite: string, letter: string): void;
   clearSquare(session: PlayerSession, invite: string, index: number): void;
@@ -408,6 +409,13 @@ export function openCoOpword(snapshot?: string): CoOpword {
       const token = crypto.randomUUID();
       state.magicLinks.push({ token, email: normalized, invite });
       return { email: normalized, token };
+    },
+    openSessions(session: PlayerSession): { invite: string; title: string }[] {
+      const player = playerFor(session);
+      sweep();
+      return state.liveSessions
+        .filter((live) => live.memberIds.includes(player.id))
+        .map((live) => ({ invite: live.invite, title: live.crossword.title }));
     },
     closeSession(session: PlayerSession, invite: string): void {
       const player = playerFor(session);

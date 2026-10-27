@@ -1,14 +1,6 @@
 <section class="home">
   <p>{{name}}</p>
-  <form method="post" action="/display-name">
-    <label>Display name <input name="displayName" required></label>
-    <button type="submit" class="filled">{{action}}</button>
-  </form>
-  <h2>Other players</h2>
-  <ul>{{players}}</ul>
-  <nav class="ways">
-    <a href="/library">Library</a>
-    <a href="/publish">Publish</a>
-    <a href="/published">Published</a>
-  </nav>
+  {{nameForm}}
+  <h2>Sessions</h2>
+  {{sessions}}
 </section>

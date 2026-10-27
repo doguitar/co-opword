@@ -318,6 +318,28 @@ test("the Author is whatever was published, a blank Author counts, and a later r
   assert.equal(coOpword.published(ada).some((crossword) => crossword.title === "Stray"), false);
 });
 
+test("a Player sees the live Sessions they are in", () => {
+  const coOpword = openCoOpword();
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  const sam = signedIn(coOpword, "sam@example.com", "Sam");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  assert.deepEqual(coOpword.openSessions(ada), []);
+
+  const started = coOpword.startSession(ada, "Tiny");
+  assert.deepEqual(coOpword.openSessions(ada), [{ invite: started.invite, title: "Tiny" }]);
+  assert.deepEqual(coOpword.openSessions(sam), []);
+
+  coOpword.joinSession(sam, started.invite);
+  assert.deepEqual(coOpword.openSessions(sam), [{ invite: started.invite, title: "Tiny" }]);
+
+  for (let index = 0; index < 9; index += 1) {
+    coOpword.selectSquare(ada, started.invite, index);
+    coOpword.typeLetter(ada, started.invite, "A");
+  }
+  assert.deepEqual(coOpword.openSessions(ada), []);
+  assert.deepEqual(coOpword.openSessions(sam), []);
+});
+
 test("two Players fill one Session from a library Crossword, and the first letter Locks the Square", () => {
   const coOpword = openCoOpword();
   const ada = signedIn(coOpword, "ada@example.com", "Ada");

@@ -200,15 +200,30 @@ function sessionClues(
 function signedIn(session: PlayerSession): string | undefined {
   try {
     const me = coOpword.whoAmI(session);
-    const players = coOpword.playersOthersSee(session).map((player) => fill("controls/player.html", { displayName: player.displayName })).join("");
+    const open = coOpword.openSessions(session);
+    const sessions =
+      open.length === 0
+        ? `<p>No open sessions. <a href="/published">Start one from a published crossword.</a></p>`
+        : `<ul>${open
+            .map(
+              (live) =>
+                `<li><a href="/session?invite=${encodeURIComponent(live.invite)}">${escapeHtml(live.title)}</a></li>`,
+            )
+            .join("")}</ul>`;
     return fill(
       "home.html",
       {
-        name: me.displayName === null ? "You have not chosen a display name yet." : me.displayName,
-        action: me.displayName === null ? "Choose" : "Rename",
-        players,
+        name: me.displayName === null ? "You have not chosen a display name yet." : `Welcome back, ${me.displayName}`,
+        nameForm:
+          me.displayName === null
+            ? `<form method="post" action="/display-name">
+    <label>Display name <input name="displayName" required></label>
+    <button type="submit" class="filled">Choose</button>
+  </form>`
+            : "",
+        sessions,
       },
-      ["players"],
+      ["sessions", "nameForm"],
     );
   } catch {
     return undefined;

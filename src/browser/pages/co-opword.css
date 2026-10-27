@@ -724,13 +724,18 @@ body:has(.session) {
   text-align: center;
 }
 
-.spread .home .ways {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
+.spread .home ul {
+  padding: 0;
+  list-style: none;
+}
+
+.spread .home li {
+  border-bottom: 1px solid #111;
 }
 
 .spread .home a {
+  display: block;
+  padding: 0.6rem 0;
   color: #111;
 }
 
