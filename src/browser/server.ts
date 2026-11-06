@@ -210,17 +210,18 @@ function signedIn(session: PlayerSession): string | undefined {
                 `<li><a href="/session?invite=${encodeURIComponent(live.invite)}">${escapeHtml(live.title)}</a></li>`,
             )
             .join("")}</ul>`;
+    const nameForm = fill(
+      "controls/name-form.html",
+      {
+        displayName: me.displayName ?? "",
+        submitLabel: me.displayName === null ? "Choose" : "Change display name",
+      },
+    );
     return fill(
       "home.html",
       {
         name: me.displayName === null ? "You have not chosen a display name yet." : `Welcome back, ${me.displayName}`,
-        nameForm:
-          me.displayName === null
-            ? `<form method="post" action="/display-name">
-    <label>Display name <input name="displayName" required></label>
-    <button type="submit" class="filled">Choose</button>
-  </form>`
-            : "",
+        nameForm,
         sessions,
       },
       ["sessions", "nameForm"],
@@ -242,7 +243,18 @@ function normalizeSquare(value: string): string {
 function readSquares(params: URLSearchParams, size: number): string[] {
   const posted = params.getAll("square").map(normalizeSquare);
   if (posted.length === size * size) return posted;
-  return Array.from({ length: size * size }, () => "");
+  const source = Math.round(Math.sqrt(posted.length));
+  if (source * source !== posted.length || source < 9 || source > 21) {
+    return Array.from({ length: size * size }, () => "");
+  }
+  const squares = Array.from({ length: size * size }, () => "");
+  const span = Math.min(source, size);
+  for (let row = 0; row < span; row++) {
+    for (let column = 0; column < span; column++) {
+      squares[row * size + column] = posted[row * source + column];
+    }
+  }
+  return squares;
 }
 
 function wordsOn(squares: string[], size: number): BuiltWord[] {
@@ -303,40 +315,129 @@ function buildMain(fields: {
   clues: Map<string, string>;
   error: string;
   token: string;
+  step: "grid" | "clues" | "edit";
 }): string {
+  const numbers = clueStarts(fields.words, fields.size);
   const rows = [];
   for (let row = 0; row < fields.size; row++) {
     const cells = fields.squares
       .slice(row * fields.size, (row + 1) * fields.size)
-      .map((value, column) => fill("controls/build-cell.html", { value, place: `Row ${row + 1} column ${column + 1}` }))
+      .map((value, column) => {
+        const index = row * fields.size + column;
+        return fill(
+          "controls/build-cell.html",
+          {
+            shade: value === "#" ? ' class="block"' : "",
+            number: numbers.get(index) ?? "",
+            value,
+            place: `Row ${row + 1} column ${column + 1}`,
+            extra: fields.step === "clues" ? " readonly" : "",
+          },
+          ["shade", "extra"],
+        );
+      })
       .join("");
-    rows.push(fill("controls/build-row.html", { cells }, ["cells"]));
+    rows.push(fill("controls/row.html", { cells }, ["cells"]));
   }
-  const clues = fields.words
-    .map((word) =>
-      fill("controls/build-clue.html", {
-        label: `${word.direction === "across" ? "Across" : "Down"} ${word.row + 1},${word.column + 1}`,
-        clue: fields.clues.get(wordKey(word)) ?? "",
-        word: wordKey(word),
-      }),
-    )
-    .join("");
-  return fill(
-    "build.html",
-    {
-      title: fields.title,
-      author: fields.author,
-      size: String(fields.size),
-      freestyleSelected: fields.kind === "freestyle" ? "selected" : "",
-      standardSelected: fields.kind === "standard" ? "selected" : "",
-      rows: rows.join(""),
-      clues,
-      error: fields.error,
-      token: fields.token,
-      editEmail: fields.token === "" ? fill("controls/edit-email.html") : "",
-    },
-    ["freestyleSelected", "standardSelected", "rows", "clues", "editEmail"],
-  );
+  const grid = fill("controls/puzzle.html", { rows: rows.join("") }, ["rows"]);
+  const editEmail = fields.token === "" ? fill("controls/edit-email.html") : "";
+  const sizeField = `<label>Size <input name="size" type="number" min="9" max="21" value="${fields.size}" required></label>`;
+  const editActions =
+    `<button type="submit" name="intent" value="layout">Update grid</button>` +
+    `<button type="submit" class="filled" name="intent" value="publish">Publish</button>`;
+  let clues = "";
+  if (fields.step === "grid") {
+    clues = fields.words
+      .map((word) => {
+        const clue = fields.clues.get(wordKey(word)) ?? "";
+        if (clue === "") return "";
+        return fill("controls/build-preserved-clue.html", { word: wordKey(word), clue });
+      })
+      .join("");
+  } else if (fields.step === "edit") {
+    clues = fields.words
+      .map((word) => {
+        const clue = fields.clues.get(wordKey(word)) ?? "";
+        const number = numbers.get(word.row * fields.size + word.column) ?? "";
+        const direction = word.direction === "across" ? "Across" : "Down";
+        return fill("controls/build-edit-clue.html", {
+          label: `${number} ${direction}`,
+          clue,
+          word: wordKey(word),
+        });
+      })
+      .join("");
+  } else {
+    const lines = (direction: "across" | "down") =>
+      fields.words
+        .filter((word) => word.direction === direction)
+        .map((word) => {
+          const number = numbers.get(word.row * fields.size + word.column) ?? "";
+          const directionName = direction === "across" ? "Across" : "Down";
+          return fill("controls/build-clue.html", {
+            number,
+            label: `${number} ${directionName}`,
+            clue: fields.clues.get(wordKey(word)) ?? "",
+            word: wordKey(word),
+          });
+        })
+        .join("");
+    clues = fill(
+      "controls/clue-columns.html",
+      { across: lines("across"), down: lines("down") },
+      ["across", "down"],
+    );
+  }
+  const content =
+    fields.step === "edit"
+      ? fill(
+          "controls/build-edit.html",
+          {
+            title: fields.title,
+            author: fields.author,
+            freestyleSelected: fields.kind === "freestyle" ? "selected" : "",
+            standardSelected: fields.kind === "standard" ? "selected" : "",
+            sizeField,
+            grid,
+            clues,
+            editEmail,
+            error: fields.error,
+            actions: editActions,
+          },
+          ["freestyleSelected", "standardSelected", "sizeField", "grid", "clues", "editEmail", "actions"],
+        )
+      : fill(
+          "controls/build-stage.html",
+          {
+            grid,
+            options:
+              fields.step === "grid"
+                ? fill("controls/build-options.html", {
+                    title: fields.title,
+                    author: fields.author,
+                    size: String(fields.size),
+                    freestyleSelected: fields.kind === "freestyle" ? "selected" : "",
+                    standardSelected: fields.kind === "standard" ? "selected" : "",
+                  })
+                : fill("controls/build-hidden-options.html", {
+                    title: fields.title,
+                    author: fields.author,
+                    kind: fields.kind,
+                    size: String(fields.size),
+                  }),
+            rulesHidden: fields.kind === "standard" ? "" : "hidden",
+            clues,
+            editEmail,
+            error: fields.error,
+            actions: fill("controls/build-actions.html", {
+              backHidden: fields.step === "grid" ? "hidden" : "",
+              intent: fields.step === "grid" ? "clues" : "publish",
+              label: fields.step === "grid" ? "Continue to clues" : "Publish",
+            }),
+          },
+          ["grid", "options", "clues", "editEmail", "actions"],
+        );
+  return fill("build.html", { step: fields.step, token: fields.token, content }, ["content"]);
 }
 
 function reviseBuilder(
@@ -369,6 +470,7 @@ function reviseBuilder(
         clues,
         error: "",
         token,
+        step: "edit",
       }),
     },
     ["form"],
@@ -410,12 +512,69 @@ function readBuild(body: URLSearchParams): {
   };
 }
 
-function reviseNotice(email: string, token: string): string {
+async function reviseNotice(email: string, token: string): Promise<string> {
   const href = `/revise?token=${encodeURIComponent(token)}`;
   const address = email.trim();
-  if (address !== "") deliverLink(withdrawOutboxPath, address, token);
-  const text = address === "" ? "A Revise link is ready." : `A Revise link was sent to ${address}.`;
-  return messageLink(text, href, "Revise");
+  if (address === "") return messageLink("A Revise link is ready.", href, "Revise");
+  try {
+    await deliverLink(withdrawOutboxPath, address, token, href);
+    return messageLink(`A Revise link was sent to ${address}.`, href, "Revise");
+  } catch {
+    return messageLink(`The Crossword was published, but the Revise link could not be emailed to ${address}.`, href, "Revise");
+  }
+}
+
+type SessionStream = { response: ServerResponse; token: string; invite: string };
+
+const streams = new Set<SessionStream>();
+const grace = new Map<string, ReturnType<typeof setTimeout>>();
+// A Session form POST drops this page's stream before the redirected page opens the next one.
+const reconnectGraceMs = 1500;
+
+function streamKey(token: string, invite: string): string {
+  return `${token}\0${invite}`;
+}
+
+function publish(invite: string): void {
+  for (const stream of streams) {
+    if (stream.invite !== invite) continue;
+    try {
+      stream.response.write("event: session\ndata: refresh\n\n");
+    } catch {
+      streams.delete(stream);
+    }
+  }
+}
+
+function cancelGrace(token: string, invite: string): void {
+  const pending = grace.get(streamKey(token, invite));
+  if (!pending) return;
+  clearTimeout(pending);
+  grace.delete(streamKey(token, invite));
+}
+
+function dropStream(stream: SessionStream): void {
+  if (!streams.delete(stream)) return;
+  const key = streamKey(stream.token, stream.invite);
+  if ([...streams].some((open) => streamKey(open.token, open.invite) === key)) return;
+  const pending = grace.get(key);
+  if (pending) clearTimeout(pending);
+  grace.set(
+    key,
+    setTimeout(() => {
+      grace.delete(key);
+      if ([...streams].some((open) => streamKey(open.token, open.invite) === key)) return;
+      try {
+        coOpword.closeSession({ token: stream.token }, stream.invite);
+      } catch {
+        return;
+      }
+      void save().then(
+        () => publish(stream.invite),
+        () => {},
+      );
+    }, reconnectGraceMs),
+  );
 }
 
 const server = createServer(async (request, response) => {
@@ -431,6 +590,18 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/session.js") {
     response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
     response.end(readFileSync(join(pagesDir, "session.js")));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/menu.js") {
+    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    response.end(readFileSync(join(pagesDir, "menu.js")));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/build.js") {
+    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    response.end(readFileSync(join(pagesDir, "build.js")));
     return;
   }
 
@@ -450,9 +621,18 @@ const server = createServer(async (request, response) => {
     const email = body.get("email") ?? "";
     const issued = coOpword.requestMagicLink(email);
     await save();
-    deliverLink(outboxPath, issued.email, issued.token);
     const href = `/magic?token=${encodeURIComponent(issued.token)}`;
-    send(response, 200, messageLink(`A magic link was sent to ${issued.email}.`, href, "Open magic link"));
+    try {
+      await deliverLink(outboxPath, issued.email, issued.token, href);
+    } catch {
+      send(response, 503, message("We could not send the sign-in email. Please try again."));
+      return;
+    }
+    if (process.env.NODE_ENV === "production") {
+      send(response, 200, message("Check your email for a sign-in link."));
+    } else {
+      send(response, 200, messageLink(`A magic link was sent to ${issued.email}.`, href, "Open magic link"));
+    }
     return;
   }
 
@@ -460,13 +640,23 @@ const server = createServer(async (request, response) => {
     try {
       const session = coOpword.openMagicLink(url.searchParams.get("token") ?? "");
       await save();
+      const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
       send(response, 303, message("Signed in."), {
         location: session.invite === null ? "/" : `/session?invite=${encodeURIComponent(session.invite)}`,
-        "set-cookie": `player=${encodeURIComponent(session.token)}; HttpOnly; Path=/; SameSite=Lax`,
+        "set-cookie": `player=${encodeURIComponent(session.token)}; HttpOnly; Path=/; SameSite=Lax${secure}`,
       });
     } catch {
       send(response, 400, message("That magic link is no longer valid."));
     }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/sign-out") {
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    send(response, 303, message("Signed out."), {
+      location: "/",
+      "set-cookie": `player=; Max-Age=0; HttpOnly; Path=/; SameSite=Lax${secure}`,
+    });
     return;
   }
 
@@ -517,7 +707,11 @@ const server = createServer(async (request, response) => {
         send(response, 200, frame(fill("library.html", { items }, ["items"])));
         return;
       }
-      const opened = coOpword.openLibraryCrossword(session, url.searchParams.get("title") ?? "");
+      const title = url.searchParams.get("title") ?? "";
+      const author = url.searchParams.get("author");
+      const opened = author === null
+        ? coOpword.openLibraryCrossword(session, title)
+        : coOpword.openPublishedCrossword(session, title, author);
       send(
         response,
         200,
@@ -534,7 +728,7 @@ const server = createServer(async (request, response) => {
         ),
       );
     } catch {
-      send(response, 404, message("That Crossword is not in the library."));
+      send(response, 404, message(url.searchParams.has("author") ? "That Published Crossword is not available." : "That Crossword is not in the library."));
     }
     return;
   }
@@ -552,6 +746,7 @@ const server = createServer(async (request, response) => {
     }
     const me = coOpword.whoAmI({ token });
     const size = 15;
+    const squares = Array.from({ length: size * size }, () => "");
     send(
       response,
       200,
@@ -561,11 +756,12 @@ const server = createServer(async (request, response) => {
           author: me.displayName ?? "",
           kind: "freestyle",
           size,
-          squares: Array.from({ length: size * size }, () => ""),
-          words: [],
+          squares,
+          words: wordsOn(squares, size),
           clues: new Map(),
           error: "",
           token: "",
+          step: "grid",
         }),
       ),
     );
@@ -579,7 +775,18 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const show = (error: string) => send(response, 200, frame(buildMain({ ...built, error })));
+    const show = (error: string) =>
+      send(
+        response,
+        200,
+        frame(
+          buildMain({
+            ...built,
+            error,
+            step: built.token !== "" ? "edit" : built.intent === "clues" || built.intent === "publish" ? "clues" : "grid",
+          }),
+        ),
+      );
     if (built.intent !== "publish") {
       show("");
       return;
@@ -609,9 +816,10 @@ const server = createServer(async (request, response) => {
         built.author,
       );
       await save();
-      send(response, 200, reviseNotice(built.editEmail, issued.withdrawToken));
-    } catch {
-      show("That Crossword cannot be published.");
+      send(response, 200, await reviseNotice(built.editEmail, issued.withdrawToken));
+    } catch (error) {
+      const reason = error instanceof CrosswordRejected ? error.reason : null;
+      show(reason ?? "That Crossword cannot be published.");
     }
     return;
   }
@@ -638,7 +846,7 @@ const server = createServer(async (request, response) => {
       const crossword = JSON.parse(body.get("crossword") ?? "");
       const issued = coOpword.publishCrossword({ token }, crossword, body.get("author") ?? "");
       await save();
-      send(response, 200, reviseNotice(body.get("editEmail") ?? "", issued.withdrawToken));
+      send(response, 200, await reviseNotice(body.get("editEmail") ?? "", issued.withdrawToken));
     } catch {
       send(response, 400, message("That Crossword cannot be published."));
     }
@@ -690,6 +898,7 @@ const server = createServer(async (request, response) => {
             titleValue: crossword.title,
             author: crossword.author === "" ? "no Author" : crossword.author,
             authorValue: crossword.author,
+            previewHref: `/crossword?title=${encodeURIComponent(crossword.title)}&author=${encodeURIComponent(crossword.author)}`,
           },
           [],
         );
@@ -728,10 +937,39 @@ const server = createServer(async (request, response) => {
     try {
       coOpword.joinSession({ token }, invite);
       await save();
+      publish(invite);
       send(response, 303, message("Session"), { location: `/session?invite=${encodeURIComponent(invite)}` });
     } catch {
       send(response, 404, message("That Invite is no longer valid."));
     }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/session/events") {
+    const token = readCookie(request, "player");
+    if (!token) {
+      send(response, 401, message("Sign in."));
+      return;
+    }
+    const invite = url.searchParams.get("invite") ?? "";
+    try {
+      coOpword.openSession({ token }, invite);
+    } catch {
+      send(response, 404, message("That Invite is not yours."));
+      return;
+    }
+    cancelGrace(token, invite);
+    const stream: SessionStream = { response, token, invite };
+    streams.add(stream);
+    response.socket?.setNoDelay(true);
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-store",
+      connection: "keep-alive",
+    });
+    response.write("retry: 500\n: open\n\n");
+    response.on("close", () => dropStream(stream));
+    if (response.destroyed) dropStream(stream);
     return;
   }
 
@@ -832,6 +1070,7 @@ const server = createServer(async (request, response) => {
       else if (url.pathname === "/session/close") coOpword.closeSession({ token }, invite);
       else coOpword.typeLetter({ token }, invite, body.get("letter") ?? "");
       await save();
+      publish(invite);
       let next = url.pathname === "/session/close" ? "/" : sessionPath;
       if (url.pathname === "/session/letter") {
         try {
@@ -872,13 +1111,30 @@ const server = createServer(async (request, response) => {
     try {
       if (url.pathname === "/session/invite") {
         const issued = coOpword.inviteEmail({ token }, invite, body.get("email") ?? "");
-        if (issued.token) deliverLink(outboxPath, issued.email, issued.token);
-      } else if (url.pathname === "/session/decline") {
-        coOpword.declineFriendship({ token }, invite, body.get("displayName") ?? "");
+        const href = issued.token
+          ? `/magic?token=${encodeURIComponent(issued.token)}`
+          : `/session?invite=${encodeURIComponent(invite)}`;
+        await save();
+        publish(invite);
+        try {
+          await deliverLink(outboxPath, issued.email, issued.token, href);
+        } catch {
+          send(
+            response,
+            503,
+            messageLink("The Session invitation was created, but the email could not be sent.", `/session?invite=${encodeURIComponent(invite)}`, "Back to Session"),
+          );
+          return;
+        }
       } else {
-        coOpword.offerFriendship({ token }, invite, body.get("displayName") ?? "");
+        if (url.pathname === "/session/decline") {
+          coOpword.declineFriendship({ token }, invite, body.get("displayName") ?? "");
+        } else {
+          coOpword.offerFriendship({ token }, invite, body.get("displayName") ?? "");
+        }
+        await save();
+        publish(invite);
       }
-      await save();
       send(response, 303, message("Session"), { location: `/session?invite=${encodeURIComponent(invite)}` });
     } catch {
       send(response, 400, message("That did not change the Session."));

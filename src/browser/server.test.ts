@@ -25,7 +25,7 @@ function freePort(): Promise<number> {
 async function startServer(port: number): Promise<ChildProcess> {
   const child = spawn(process.execPath, ["--experimental-strip-types", "src/browser/server.ts"], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), DATABASE_URL: "" },
+    env: { ...process.env, PORT: String(port), DATABASE_URL: "sqlite::memory:" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -43,7 +43,7 @@ async function startServer(port: number): Promise<ChildProcess> {
   return child;
 }
 
-type Reply = { status: number; body: string; location: string | null; cookie: string | null };
+type Reply = { status: number; body: string; location: string | null; cookie: string | null; setCookie: string | null; type: string };
 
 async function send(
   port: number,
@@ -67,11 +67,83 @@ async function send(
     body: await response.text(),
     location: response.headers.get("location"),
     cookie: setCookie ? setCookie.split(";")[0] : null,
+    setCookie: setCookie ?? null,
+    type: response.headers.get("content-type") ?? "",
   };
 }
 
+type Watch = {
+  status: number;
+  type: string;
+  text: () => string;
+  events: () => number;
+  untilOpen: () => Promise<void>;
+  untilCount: (count: number) => Promise<void>;
+  stop: () => void;
+};
+
+function watchSession(port: number, invite: string, cookie: string | null): Promise<Watch> {
+  const controller = new AbortController();
+  return fetch(`http://127.0.0.1:${port}/session/events?invite=${encodeURIComponent(invite)}`, {
+    headers: { accept: "text/event-stream", ...(cookie ? { cookie } : {}) },
+    signal: controller.signal,
+  }).then(async (response) => {
+    let text = "";
+    if (response.ok && response.body) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      void (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            text += decoder.decode(value, { stream: true });
+          }
+        } catch {
+          // The test closed this stream.
+        }
+      })();
+    } else {
+      text = await response.text();
+    }
+    const events = () => text.split("event: session").length - 1;
+    const waitUntil = async (ready: () => boolean, detail: () => string) => {
+      const deadline = Date.now() + 4000;
+      while (!ready()) {
+        if (Date.now() > deadline) throw new Error(detail());
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    };
+    return {
+      status: response.status,
+      type: response.headers.get("content-type") ?? "",
+      text: () => text,
+      events,
+      untilOpen: () => waitUntil(() => text.includes(": open"), () => `stream ${response.status} ${JSON.stringify(text)}`),
+      untilCount: (count: number) => waitUntil(() => events() >= count, () => `saw ${events()} session events in ${JSON.stringify(text)}`),
+      stop: () => controller.abort(),
+    };
+  });
+}
+
+function squareClass(body: string, index: string): string {
+  const match = body.match(new RegExp(`<td class=\"([^\"]*)\">\\s*<button type=\"submit\" name=\"index\" value=\"${index}\"`));
+  assert.ok(match, index);
+  return match[1];
+}
+
+async function signIn(port: number, label: string): Promise<string> {
+  const sent = await send(port, "POST", "/sign-in", null, { email: `${label}-${Date.now()}@example.com` });
+  const magic = sent.body.match(/<a href=\"([^\"]+)\">/)?.[1] ?? "";
+  const signed = await send(port, "GET", magic, null);
+  const cookie = signed.cookie;
+  assert.ok(cookie);
+  await send(port, "POST", "/display-name", cookie, { displayName: `${label}${Date.now()}` });
+  return cookie;
+}
+
 function menuLinks(body: string): string[][] {
-  const menu = body.match(/<summary>Menu<\/summary>\s*<nav>([\s\S]*?)<\/nav>/);
+  const menu = body.match(/<nav class="menu"[^>]*>([\s\S]*?)<\/nav>/);
   assert.ok(menu);
   return [...menu[1].matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map((match) => [match[1], match[2]]);
 }
@@ -104,6 +176,48 @@ function rejection(body: string, invite: string): void {
   );
 }
 
+test("Sign out is a menu placeholder while the route clears the browser session cookie", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const cookie = await signIn(port, "signout");
+    const home = await send(port, "GET", "/", cookie);
+    for (const label of ["Sign out", "Help", "Profile"]) {
+      assert.match(home.body, new RegExp(`<a>${label}</a>`));
+      assert.doesNotMatch(home.body, new RegExp(`<a [^>]*href[^>]*>${label}</a>`));
+    }
+    assert.doesNotMatch(home.body, /action="\/sign-out"/);
+
+    const signedOut = await send(port, "POST", "/sign-out", cookie);
+    assert.equal(signedOut.status, 303);
+    assert.equal(signedOut.location, "/");
+    assert.match(signedOut.setCookie ?? "", /^player=; Max-Age=0;/);
+    assert.match(signedOut.setCookie ?? "", /HttpOnly; Path=\/; SameSite=Lax/);
+    assert.match((await send(port, "GET", "/", null)).body, /action="\/sign-in"/);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
+test("a Player can rename their display name after signing in", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const cookie = await signIn(port, "rename");
+    const displayName = `Renamed${Date.now()}`;
+    const changed = await send(port, "POST", "/display-name", cookie, { displayName });
+    assert.equal(changed.status, 303);
+    assert.equal(changed.location, "/");
+    const home = await send(port, "GET", "/", cookie);
+    assert.match(home.body, new RegExp(`<p>Welcome back, ${displayName}</p>`));
+    assert.match(home.body, new RegExp(`name="displayName" value="${displayName}"`));
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
 test("a rejected letter leaves the Locked letter and links back to that Session", async () => {
   const port = await freePort();
   const child = await startServer(port);
@@ -123,8 +237,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(idleHome.body, /No open sessions\. <a href="\/published">Start one from a published crossword\.<\/a>/);
     assert.match(idleHome.body, new RegExp(`<p>Welcome back, ${displayName}</p>`));
     assert.equal(idleHome.body.includes("Other players"), false);
-    assert.equal(idleHome.body.includes("Rename"), false);
-    assert.equal(idleHome.body.includes('action="/display-name"'), false);
+    assert.match(idleHome.body, new RegExp(`<form method="post" action="/display-name">[\\s\\S]*name="displayName" value="${displayName}"`));
     const started = await send(port, "POST", "/session", cookie, { title: "First Row" });
     const invite = new URL(started.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
     assert.equal(started.status, 303);
@@ -235,7 +348,6 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(about.status, 200);
     assert.match(about.body, /About Us is coming soon\./);
     assert.equal(about.body.includes("Support is coming soon."), false);
-    assert.equal(about.body.includes("<summary>Menu</summary>"), false);
     assert.match(about.body, /<p class="brand">Co-opword<\/p>/);
     assert.match(about.body, /<footer>/);
     assert.equal(about.body.includes("Game"), false);
@@ -257,7 +369,6 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(support.status, 200);
     assert.match(support.body, /Support is coming soon\./);
     assert.equal(support.body.includes("About Us is coming soon."), false);
-    assert.equal(support.body.includes("<summary>Menu</summary>"), false);
     assert.match(support.body, /<p class="brand">Co-opword<\/p>/);
     assert.match(support.body, /<footer>/);
     assert.equal(support.body.includes("Game"), false);
@@ -282,11 +393,9 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
 
     const signedOut = await send(port, "GET", "/", null);
     assert.match(signedOut.body, /Email me a magic link/);
-    assert.equal(signedOut.body.includes("<summary>Menu</summary>"), false);
     for (const path of ["/", "/library", "/publish", "/published", "/completions"]) {
       const unchanged = await send(port, "GET", path, cookie);
       assert.equal(unchanged.status, 200);
-      assert.equal(unchanged.body.includes("<summary>Menu</summary>"), false);
       assert.equal(unchanged.body.includes("About Us"), false);
       assert.equal(unchanged.body.includes("Game"), false);
       if (path === "/") assert.match(unchanged.body, /<section class="home">/);
@@ -301,7 +410,6 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(first.body, /<link rel="stylesheet" href="\/co-opword.css">/);
     assert.equal(first.body.includes("<style"), false);
     assert.equal(first.body.includes(" style="), false);
-    assert.equal(first.body.includes("<script"), false);
     assert.match(first.body, /<h1>First Row<\/h1>/);
     assert.match(first.body, /<p class="brand">Co-opword<\/p>/);
     assert.equal(first.body.includes("Author"), false);
@@ -309,21 +417,16 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.equal(first.body.includes(">Type<"), false);
     assert.equal(first.body.includes("Offer friendship"), false);
     assert.equal(first.body.includes("Game"), false);
-    const menu = first.body.match(/<nav class="menu"[\s\S]*?<\/nav>/);
-    assert.ok(menu);
-    assert.deepEqual(
-      [...menu[0].matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map((match) => [match[1], match[2]]),
-      [
-        ["/", "Home"],
-        ["/library", "Library"],
-        ["/build", "Build"],
-        ["/publish", "Publish"],
-        ["/published", "Published"],
-        ["/completions", "Completions"],
-        ["/about", "About"],
-        ["/support", "Support"],
-      ],
-    );
+    assert.deepEqual(menuLinks(first.body), [
+      ["/", "Home"],
+      ["/library", "Library"],
+      ["/build", "Build"],
+      ["/publish", "Publish"],
+      ["/published", "Published"],
+      ["/completions", "Completions"],
+      ["/about", "About"],
+      ["/support", "Support"],
+    ]);
     assert.match(first.body, /\(C\) Co-opword/);
     assert.deepEqual(clueList(first.body, "Across"), ["across 9: Nine As"]);
     assert.deepEqual(clueList(first.body, "Down"), []);
@@ -353,12 +456,9 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     const live = await send(port, "GET", sessionPath(freshInvite), cookie);
     assert.match(live.body, /<p class="brand">Co-opword<\/p>/);
     assert.match(live.body, /\(C\) Co-opword/);
-    assert.match(live.body, /class="page-turn"/);
-    assert.equal(live.body.includes("<summary>Menu</summary>"), false);
-    assert.equal(live.body.includes("<code>"), false);
+    assert.match(live.body, new RegExp(`<p class="invite-code">Invite code: <code>${freshInvite}</code></p>`));
     assert.match(live.body, new RegExp(`<button type="button" class="plain" id="copy-invite" data-invite-link="/join\\?invite=${encodeURIComponent(freshInvite)}">Invite Link</button>`));
     assert.equal(live.body.includes("clipboard"), false);
-    assert.equal(live.body.replace('<script src="/session.js?v=8"></script>', "").includes("<script"), false);
     assert.equal(live.body.includes("Game"), false);
     assert.equal(live.body.includes("<td>A</td>"), false);
     assert.match(playerStatus(live.body), new RegExp(`<li class="ink-0"><span class="who">${displayName} <span class="letters">0</span></span></li>`));
@@ -456,18 +556,27 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(published.body, /Version 1/);
     assert.match(published.body, /<button type="submit" name="intent" value="delete">Delete<\/button>/);
     assert.equal(published.body.includes("Start a Session"), false);
-    assert.equal(published.body.includes("<summary>Menu</summary>"), false);
     assert.equal(published.body.includes("About Us"), false);
     assert.match(published.body, /<section class="column revise">/);
     assert.equal(published.body.includes("Game"), false);
     const listed = await send(port, "GET", "/published", cookie);
     assert.match(listed.body, new RegExp(`${publishedTitle}`));
     assert.match(listed.body, /Start a Session/);
+    const previewHref = listed.body.match(/<a href="([^"]+)">Preview<\/a>/)?.[1]?.replaceAll("&amp;", "&");
+    assert.ok(previewHref);
+    const preview = await send(port, "GET", previewHref, cookie);
+    assert.equal(preview.status, 200);
+    assert.match(preview.body, new RegExp(`<h1>${publishedTitle}</h1>`));
+    assert.match(preview.body, /<table class="grid">/);
+    assert.match(preview.body, /Start a Session/);
 
     const build = await send(port, "GET", "/build", cookie);
     assert.equal(build.status, 200);
     assert.equal(build.body.split('name="square"').length - 1, 225);
     assert.match(build.body, new RegExp(`name="author" value="${displayName}"`));
+
+    assert.match(build.body, /data-standard-rules hidden/);
+    assert.match(build.body, /15×15 or 21×21/);
     const builtTitle = `Built${Date.now()}`;
     const squares = Array.from({ length: 81 }, () => "#");
     squares[0] = "C";
@@ -494,6 +603,14 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     const builtPage = await send(port, "GET", builtHref, null);
     assert.match(builtPage.body, /A pet/);
     assert.match(builtPage.body, /An automobile/);
+    const invalidStandard = new URLSearchParams(form);
+    invalidStandard.set("title", `${builtTitle} Standard`);
+    invalidStandard.set("kind", "standard");
+    const rejectedStandard = await send(port, "POST", "/build", cookie, invalidStandard);
+    assert.equal(rejectedStandard.status, 200);
+    assert.match(rejectedStandard.body, /data-build-step="clues"/);
+    assert.match(rejectedStandard.body, /Standard Crosswords must be 15×15 or 21×21/);
+    assert.equal(rejectedStandard.body.includes("A Revise link is ready."), false);
   } finally {
     if (child.exitCode === null) {
       child.kill();
@@ -596,6 +713,274 @@ test("a signed-in Player sees the Grid and Words of a published Freestyle Crossw
     const session = await send(port, "GET", `/session?invite=${encodeURIComponent(invite)}`, cookie);
     assert.match(session.body, /Feline/);
     assert.equal(session.body.includes("Nine As"), false);
+  } finally {
+    if (child.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+  }
+});
+
+test("a Session stream updates the other Player, keeps Presence across a reload, and clears it when the stream stays closed", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  const sessionPath = (invite: string) => `/session?invite=${encodeURIComponent(invite)}`;
+  let adaStream: Watch | undefined;
+  let samStream: Watch | undefined;
+  let rejoined: Watch | undefined;
+  try {
+    const ada = await signIn(port, "Ada");
+    const sam = await signIn(port, "Sam");
+    const bea = await signIn(port, "Bea");
+    const started = await send(port, "POST", "/session", ada, { title: "First Row" });
+    const invite = new URL(started.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
+    assert.equal(started.status, 303);
+    const joined = await send(port, "GET", `/join?invite=${encodeURIComponent(invite)}`, sam);
+    assert.equal(joined.status, 303);
+    adaStream = await watchSession(port, invite, ada);
+    samStream = await watchSession(port, invite, sam);
+    assert.equal(adaStream.status, 200);
+    assert.match(adaStream.type, /text\/event-stream/);
+    await adaStream.untilOpen();
+    await samStream.untilOpen();
+
+    const selected = await send(port, "POST", "/session/select", ada, { invite, index: "0" });
+    assert.equal(selected.status, 303);
+    await samStream.untilCount(1);
+    const typed = await send(port, "POST", "/session/letter", ada, { invite, letter: "A" });
+    assert.equal(typed.status, 303);
+    await samStream.untilCount(2);
+    const samSeen = await send(port, "GET", sessionPath(invite), sam);
+    assert.equal(squareClass(samSeen.body, "0"), "ink-0");
+    assert.match(samSeen.body, /<span class=\"letter\">A<\/span>/);
+
+    const beforeSam = samStream.events();
+    await send(port, "POST", "/session/select", sam, { invite, index: "2" });
+    await samStream.untilCount(beforeSam + 1);
+    const beforeMove = samStream.events();
+    adaStream.stop();
+    const moved = await send(port, "POST", "/session/select", ada, { invite, index: "1" });
+    assert.equal(moved.status, 303);
+    rejoined = await watchSession(port, invite, ada);
+    await rejoined.untilOpen();
+    await samStream.untilCount(beforeMove + 1);
+    const settled = samStream.events();
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    assert.equal(samStream.events(), settled);
+    const kept = await send(port, "GET", sessionPath(invite), ada);
+    assert.equal(squareClass(kept.body, "1"), "selected ink-0");
+    const samKept = await send(port, "GET", sessionPath(invite), sam);
+    assert.equal(squareClass(samKept.body, "1"), "ink-0");
+    assert.equal(squareClass(samKept.body, "2"), "selected ink-1");
+
+    const marked = samStream.events();
+    rejoined.stop();
+    const anon = await watchSession(port, invite, null);
+    assert.equal(anon.status, 401);
+    assert.equal(anon.type.includes("text/event-stream"), false);
+    assert.equal(anon.text().includes("<h1>First Row</h1>"), false);
+    assert.equal(anon.text().includes('<span class="letter">A</span>'), false);
+    const outsider = await watchSession(port, invite, bea);
+    assert.equal(outsider.status, 404);
+    assert.equal(outsider.type.includes("text/event-stream"), false);
+    assert.equal(outsider.text().includes('<span class="letter">A</span>'), false);
+    await samStream.untilCount(marked + 1);
+    const cleared = await send(port, "GET", sessionPath(invite), sam);
+    assert.equal(squareClass(cleared.body, "0"), "");
+    assert.equal(squareClass(cleared.body, "1"), "");
+    assert.equal(squareClass(cleared.body, "2"), "selected ink-1");
+    assert.match(cleared.body, /<span class=\"letter\">A<\/span>/);
+    const adaCleared = await send(port, "GET", sessionPath(invite), ada);
+    assert.equal(adaCleared.body.includes("selected"), false);
+    assert.match(playerStatus(adaCleared.body), /Ada/);
+    assert.match(playerStatus(adaCleared.body), /Sam/);
+  } finally {
+    adaStream?.stop();
+    samStream?.stop();
+    rejoined?.stop();
+    if (child.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+  }
+});
+
+test("a new Crossword keeps its grid and clues across the Build steps and publishes the final text", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  const stamp = Date.now();
+  const draftTitle = `Draft${stamp}`;
+  const finalTitle = `Published${stamp}`;
+  const size = 9;
+  const squares = Array.from({ length: size * size }, () => "#");
+  const put = (row: number, column: number, letter: string) => {
+    squares[row * size + column] = letter;
+  };
+  for (const [column, letter] of [..."CAT"].entries()) put(0, column, letter);
+  for (const [column, letter] of [..."DOG"].entries()) put(0, 4 + column, letter);
+  put(1, 0, "A");
+  put(2, 0, "R");
+  put(1, 4, "O");
+  put(2, 4, "G");
+  const clueText = ["A pet", "Hound", "Automobile", "Puppy"];
+  const wordKeys = ["across-0-0", "across-0-4", "down-0-0", "down-0-4"];
+  const form = (intent: string, clues: string[], title: string) => {
+    const body = new URLSearchParams();
+    body.set("title", title);
+    body.set("author", "Ada");
+    body.set("kind", "freestyle");
+    body.set("size", String(size));
+    for (const square of squares) body.append("square", square);
+    wordKeys.forEach((key, index) => {
+      const clue = clues[index];
+      if (clue === undefined) return;
+      body.append("word", key);
+      body.append("clue", clue);
+    });
+    body.set("intent", intent);
+    return body;
+  };
+  try {
+    const cookie = await signIn(port, "Ada");
+    const script = await send(port, "GET", "/build.js", null);
+    assert.equal(script.status, 200);
+    assert.match(script.type, /javascript/);
+    assert.ok(script.body.length > 0);
+
+    const grid = await send(port, "GET", "/build", cookie);
+    assert.equal(grid.status, 200);
+    assert.match(grid.body, /<form class="build" method="post" action="\/build" data-build-step="grid">/);
+    assert.match(grid.body, /<script type="module" src="\/build.js"><\/script>/);
+    assert.match(grid.body, /<button type="submit" class="filled" name="intent" value="clues">Continue to clues<\/button>/);
+    assert.match(grid.body, /<input name="size" type="number" min="9" max="21" value="15" required>/);
+    assert.equal(grid.body.split('name="square"').length - 1, 225);
+    assert.equal(grid.body.includes('name="clue"'), false);
+    assert.equal(grid.body.includes('name="intent" value="publish"'), false);
+    assert.equal(grid.body.includes("readonly"), false);
+
+    const clues = await send(port, "POST", "/build", cookie, form("clues", [], draftTitle));
+    assert.equal(clues.status, 200);
+    assert.match(clues.body, /data-build-step="clues"/);
+    assert.match(clues.body, /<input type="hidden" name="size" value="9">/);
+    assert.equal(clues.body.includes('type="number"'), false);
+    assert.equal(clues.body.split("readonly").length - 1, 81);
+    assert.equal(clues.body.split('<td class="block">').length - 1, 71);
+    assert.match(clues.body, /<td><span class="number">1<\/span><input name="square" maxlength="1" value="C" aria-label="Row 1 column 1" readonly>/);
+    assert.match(clues.body, /<td><span class="number">2<\/span><input name="square" maxlength="1" value="D" aria-label="Row 1 column 5" readonly>/);
+    assert.equal(clues.body.includes('<span class="number">3</span>'), false);
+    assert.equal(clues.body.split('name="clue"').length - 1, 4);
+    assert.match(clues.body, /<textarea class="build-clue-editor" name="clue" rows="3" aria-label="1 Across clue" data-build-clue-editor hidden><\/textarea>/);
+    assert.match(clues.body, new RegExp(`name="title" value="${draftTitle}"`));
+    assert.match(clues.body, /name="author" value="Ada"/);
+    assert.match(clues.body, /<button type="submit" class="plain" name="intent" value="back"\s*>Back<\/button>/);
+    assert.match(clues.body, /<button type="submit" class="filled" name="intent" value="publish">Publish<\/button>/);
+    assert.equal(clues.body.includes("Continue to clues"), false);
+
+    const back = await send(port, "POST", "/build", cookie, form("back", clueText, draftTitle));
+    assert.equal(back.status, 200);
+    assert.match(back.body, /data-build-step="grid"/);
+    assert.match(back.body, /<td><span class="number">1<\/span><input name="square" maxlength="1" value="C" aria-label="Row 1 column 1">/);
+    assert.match(back.body, new RegExp(`name="title" value="${draftTitle}"`));
+    assert.match(back.body, /name="author" value="Ada"/);
+    assert.match(back.body, /<option value="freestyle" selected>/);
+    assert.match(back.body, /<input name="size" type="number" min="9" max="21" value="9" required>/);
+    assert.match(back.body, /<input type="hidden" name="word" value="across-0-0">\s*<input type="hidden" name="clue" value="A pet">/);
+    assert.match(back.body, /<input type="hidden" name="clue" value="Hound">/);
+    assert.match(back.body, /<input type="hidden" name="clue" value="Automobile">/);
+    assert.match(back.body, /<input type="hidden" name="clue" value="Puppy">/);
+    assert.equal(back.body.includes("readonly"), false);
+    assert.match(back.body, /Continue to clues/);
+
+    const kept = await send(port, "POST", "/build", cookie, form("clues", clueText, draftTitle));
+    assert.match(kept.body, /data-build-step="clues"/);
+    assert.match(kept.body, /<span data-clue-text>A pet<\/span>/);
+    assert.match(kept.body, /<span data-clue-text>Hound<\/span>/);
+    assert.match(kept.body, /<span data-clue-text>Automobile<\/span>/);
+    assert.match(kept.body, /<span data-clue-text>Puppy<\/span>/);
+
+    const published = await send(port, "POST", "/build", cookie, form("publish", ["A pet", "Wolf", "Automobile", "Puppy"], finalTitle));
+    assert.equal(published.status, 200);
+    assert.match(published.body, /A Revise link is ready/);
+    const href = published.body.match(/<a href="([^"]+)">Revise<\/a>/)?.[1] ?? "";
+    const revise = await send(port, "GET", href, null);
+    assert.equal(revise.status, 200);
+    assert.match(revise.body, /data-build-step="edit"/);
+    assert.match(revise.body, new RegExp(`name="title" value="${finalTitle}"`));
+    assert.equal(revise.body.includes(`value="${draftTitle}"`), false);
+    assert.match(revise.body, /value="A pet"/);
+    assert.match(revise.body, /value="Wolf"/);
+    assert.equal(revise.body.includes('value="Hound"'), false);
+    assert.match(revise.body, /value="Automobile"/);
+    assert.match(revise.body, /value="Puppy"/);
+    assert.match(revise.body, /value="C"/);
+    assert.match(revise.body, /<button type="submit" name="intent" value="layout">Update grid<\/button>/);
+    assert.match(revise.body, /<button type="submit" class="filled" name="intent" value="publish">Publish<\/button>/);
+    assert.equal(revise.body.includes("readonly"), false);
+    assert.match(revise.body, /<button type="submit" name="intent" value="delete">Delete<\/button>/);
+  } finally {
+    if (child.exitCode === null) {
+      child.kill();
+      await once(child, "exit");
+    }
+  }
+});
+
+test("changing Build size keeps the overlapping squares and the clues at those coordinates", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  const nine = Array.from({ length: 81 }, () => "#");
+  nine[0] = "c";
+  nine[1] = "A";
+  nine[2] = "T";
+  nine[9] = "A";
+  nine[18] = "R";
+  nine[80] = "Z";
+  const fifteen = Array.from({ length: 225 }, () => "#");
+  for (let row = 0; row < 9; row++) {
+    for (let column = 0; column < 9; column++) fifteen[row * 15 + column] = nine[row * 9 + column];
+  }
+  fifteen[10] = "Q";
+  fifteen[11] = "Q";
+  const post = (size: string, squares: string[], outside: boolean) => {
+    const body = new URLSearchParams();
+    body.set("title", "Resize");
+    body.set("author", "Ada");
+    body.set("kind", "freestyle");
+    body.set("size", size);
+    for (const square of squares) body.append("square", square);
+    body.append("word", "across-0-0");
+    body.append("clue", "A pet");
+    body.append("word", "down-0-0");
+    body.append("clue", "An automobile");
+    if (outside) {
+      body.append("word", "across-0-10");
+      body.append("clue", "Outside");
+    }
+    body.set("intent", "clues");
+    return body;
+  };
+  try {
+    const cookie = await signIn(port, "Ada");
+    const expanded = await send(port, "POST", "/build", cookie, post("15", nine, false));
+    assert.equal(expanded.status, 200);
+    assert.equal(expanded.body.split('name="square"').length - 1, 225);
+    assert.match(expanded.body, /value="C" aria-label="Row 1 column 1" readonly/);
+    assert.match(expanded.body, /value="#" aria-label="Row 1 column 4" readonly/);
+    assert.match(expanded.body, /value="Z" aria-label="Row 9 column 9" readonly/);
+    assert.match(expanded.body, /value="" aria-label="Row 1 column 10" readonly/);
+    assert.match(expanded.body, /<span data-clue-text>A pet<\/span>/);
+    assert.match(expanded.body, /<span data-clue-text>An automobile<\/span>/);
+
+    const shrunk = await send(port, "POST", "/build", cookie, post("9", fifteen, true));
+    assert.equal(shrunk.status, 200);
+    assert.equal(shrunk.body.split('name="square"').length - 1, 81);
+    assert.match(shrunk.body, /value="C" aria-label="Row 1 column 1" readonly/);
+    assert.match(shrunk.body, /value="Z" aria-label="Row 9 column 9" readonly/);
+    assert.equal(shrunk.body.includes('value="Q"'), false);
+    assert.equal(shrunk.body.includes("column 10"), false);
+    assert.equal(shrunk.body.includes("Outside"), false);
+    assert.match(shrunk.body, /<span data-clue-text>A pet<\/span>/);
+    assert.match(shrunk.body, /<span data-clue-text>An automobile<\/span>/);
   } finally {
     if (child.exitCode === null) {
       child.kill();

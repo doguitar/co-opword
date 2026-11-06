@@ -1,11 +1,12 @@
 <div class="spread">
+  {{menu}}
+  <div class="reveal-shade" aria-hidden="true"></div>
   <div class="leaf">
     {{masthead}}
     {{copyright}}
-    <label class="curl">
-      <input class="page-turn" type="checkbox" aria-controls="menu" aria-label="Menu">
-    </label>
     <main>{{main}}</main>
   </div>
-  {{menu}}
+  <div class="curl" aria-hidden="true"></div>
+  <button type="button" class="menu-toggle" id="menu-toggle" aria-expanded="false" aria-controls="menu">Menu</button>
 </div>
+<script src="/menu.js"></script>

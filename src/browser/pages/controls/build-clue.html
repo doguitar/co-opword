@@ -1,2 +1,7 @@
-<label>{{label}} <input name="clue" value="{{clue}}"></label>
-<input type="hidden" name="word" value="{{word}}">
+<li data-build-clue>
+  <button type="button" class="plain build-clue-display" data-build-clue-display>
+    <span data-clue-number>{{number}}.</span> <span data-clue-text>{{clue}}</span>
+  </button>
+  <textarea class="build-clue-editor" name="clue" rows="3" aria-label="{{label}} clue" data-build-clue-editor hidden>{{clue}}</textarea>
+  <input type="hidden" name="word" value="{{word}}">
+</li>

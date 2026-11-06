@@ -1,4 +1,8 @@
 const scrollKey = "session-scroll";
+let leaving = false;
+document.addEventListener("submit", () => {
+  leaving = true;
+}, true);
 for (const id of ["select-square", "type-letter", "clear-square"]) {
   document.getElementById(id)?.addEventListener("submit", () => {
     sessionStorage.setItem(scrollKey, String(window.scrollY));
@@ -35,6 +39,7 @@ copyInvite?.addEventListener("click", () => {
 
 document.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (document.querySelector(".spread.is-open")) return;
   const target = event.target;
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
   if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") {
@@ -80,3 +85,14 @@ document.addEventListener("keydown", (event) => {
   letter.value = event.key;
   form.requestSubmit();
 });
+
+const liveInvite = new URLSearchParams(location.search).get("invite");
+if (liveInvite) {
+  const live = new EventSource(`/session/events?invite=${encodeURIComponent(liveInvite)}`);
+  live.addEventListener("session", () => {
+    if (leaving) return;
+    live.close();
+    sessionStorage.setItem(scrollKey, String(window.scrollY));
+    location.reload();
+  });
+}

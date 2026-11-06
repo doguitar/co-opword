@@ -14,6 +14,10 @@ HTML lives in HTML files. The browser module serves those files. It does not ass
 
 CSS lives in CSS files. A stylesheet that a compiler writes is fine. The HTML does not contain CSS: no `<style>` element, no `style` attribute, and no stylesheet text pasted into a template. Link the CSS file from the HTML file.
 
-The look is a black and white newspaper crossword. The rules and the reference pictures are in `docs/newspaper.md`. HTML and CSS follow those pictures. They do not invent a second look.
-
 Any change to a UI element requires a new regression screenshot of every page that shows it. See `docs/regression.md`.
+
+Use the width of the page before adding height. A list, a row of controls, or a status that can sit side by side flows left to right and wraps. The page should stay short.
+
+## Newspaper
+
+The look is a black and white newspaper crossword. The visual rules and prompts are in `docs/newspaper.md`. HTML and CSS follow that written guidance; they do not invent a second look.

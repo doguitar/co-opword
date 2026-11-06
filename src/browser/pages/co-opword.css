@@ -51,13 +51,6 @@
   font-weight: 700;
 }
 
-.sheet .menu nav {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.5rem 0;
-}
-
 .sheet .board {
   display: flex;
   align-items: flex-start;
@@ -137,6 +130,24 @@ body:has(.session) {
   overflow: hidden;
 }
 
+@property --fold-top {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --fold-bot {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --curl-w {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
 .spread {
   position: relative;
   min-height: 100vh;
@@ -144,26 +155,44 @@ body:has(.session) {
   background: #fff;
   color: #111;
   font-family: Georgia, "Times New Roman", serif;
+  --fold-top: 4.5rem;
+  --fold-bot: calc(4.5rem - 100vh);
+  --curl-w: 1.35rem;
+  --curl-h: 100vh;
+  --curl-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --curl-dur: 520ms;
+  transition:
+    --fold-top var(--curl-dur) var(--curl-ease),
+    --fold-bot var(--curl-dur) var(--curl-ease),
+    --curl-w var(--curl-dur) var(--curl-ease);
+}
+
+.spread.is-open {
+  --fold-top: 33vw;
+  --fold-bot: 20vw;
+  --curl-w: 5.2vw;
 }
 
 .spread .leaf {
-  position: relative;
-  z-index: 1;
+  position: fixed;
+  inset: 0;
+  z-index: 2;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  width: 100%;
-  min-height: 100vh;
-  min-height: 100dvh;
+  width: auto;
+  min-height: 0;
   padding: 1.5rem 2rem;
+  overflow: auto;
   background: #fff;
-  transition: width 0.35s ease;
   container-type: inline-size;
-}
-
-.spread:has(.page-turn:checked) .leaf {
-  width: 50%;
-  border-right: 1px solid #111;
+  /* Viewport-sized face so fold matches the fixed 100vh curl on tall pages. */
+  clip-path: polygon(
+    var(--fold-top) 0%,
+    100% 0%,
+    100% 100%,
+    var(--fold-bot) 100%
+  );
 }
 
 .spread main {
@@ -244,15 +273,10 @@ body:has(.session) {
   font-size: clamp(1rem, 1.5vw, 1.5rem);
 }
 
-.spread:has(.session),
 .spread .leaf:has(.session) {
   height: 100dvh;
   max-height: 100dvh;
-  min-height: 0;
   overflow: hidden;
-}
-
-.spread .leaf:has(.session) {
   transition: none;
 }
 
@@ -273,6 +297,34 @@ body:has(.session) {
 }
 
 .spread .leaf:has(.session) > footer {
+  flex: 0 0 auto;
+}
+body:has(.build-stage) {
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.spread .leaf:has(.build-stage) {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  transition: none;
+}
+
+.spread .leaf:has(.build-stage) .brand {
+  font-size: min(4.9rem, 8.7vh);
+}
+
+.spread main:has(.build-stage) {
+  max-width: none;
+  align-items: stretch;
+  flex: 1 1 0;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.spread .leaf:has(.build-stage) > footer {
   flex: 0 0 auto;
 }
 
@@ -314,6 +366,47 @@ body:has(.session) {
   left: -1rem;
   border-left: 1px solid #111;
 }
+.build-stage {
+  display: grid;
+  flex: 1 1 0;
+  align-self: stretch;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  column-gap: 2rem;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.build-board {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.build-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.build-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1rem;
+  border-left: 1px solid #111;
+}
 
 .session h1 {
   grid-column: 1 / -1;
@@ -332,7 +425,9 @@ body:has(.session) {
 }
 
 .session .grid,
-.session .grid tbody {
+.session .grid tbody,
+.spread form.build .grid,
+.spread form.build .grid tbody {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -341,19 +436,30 @@ body:has(.session) {
 
 .session .grid {
   box-sizing: border-box;
-  width: calc(100dvh - 23rem);
-  height: calc(100dvh - 23rem);
+  width: min(max(20rem, calc(100dvh - 23rem)), 100%);
+  height: auto;
+  aspect-ratio: 1;
   max-width: 100%;
 }
 
-.session .grid tbody {
+.spread form.build:has(.build-stage) .grid {
+  box-sizing: border-box;
+  width: min(max(20rem, calc(100dvh - 23rem)), 100%);
+  height: auto;
+  aspect-ratio: 1;
+  max-width: 100%;
+}
+
+.session .grid tbody,
+.spread form.build .grid tbody {
   flex: 1 1 auto;
   width: 100%;
   height: 100%;
   aspect-ratio: auto;
 }
 
-.session .grid tr {
+.session .grid tr,
+.spread form.build .grid tr {
   display: grid;
   flex: 1 1 0;
   grid-auto-flow: column;
@@ -363,12 +469,12 @@ body:has(.session) {
   min-height: 0;
 }
 
-.session .grid td {
+.session .grid td,
+.spread form.build .grid td {
   width: auto;
-  height: auto;
+  height: 100%;
   min-width: 0;
   max-width: none;
-  height: 100%;
   aspect-ratio: auto;
   box-sizing: border-box;
   padding: 0;
@@ -383,15 +489,18 @@ body:has(.session) {
   container-type: inline-size;
 }
 
-.session .grid tr td:first-child {
+.session .grid tr td:first-child,
+.spread form.build .grid tr td:first-child {
   border-left-width: 1px;
 }
 
-.session .grid tr:first-child td {
+.session .grid tr:first-child td,
+.spread form.build .grid tr:first-child td {
   border-top-width: 1px;
 }
 
-.session .grid td.block {
+.session .grid td.block,
+.spread form.build .grid td.block {
   background: #111;
 }
 
@@ -414,7 +523,8 @@ body:has(.session) {
   cursor: pointer;
 }
 
-.session .grid .number {
+.session .grid .number,
+.spread form.build .grid .number {
   position: absolute;
   top: 0.05rem;
   left: 0.12rem;
@@ -424,7 +534,8 @@ body:has(.session) {
   text-transform: none;
 }
 
-.session .grid .number:empty {
+.session .grid .number:empty,
+.spread form.build .grid .number:empty {
   display: none;
 }
 
@@ -447,13 +558,15 @@ body:has(.session) {
   margin-top: 0.45rem;
 }
 
-.session .clues {
+.session .clues,
+.build-panel .clues {
   width: 100%;
   max-width: 100%;
   text-align: left;
 }
 
-.session .clues h2 {
+.session .clues h2,
+.build-panel .clues h2 {
   text-align: center;
 }
 
@@ -461,7 +574,8 @@ body:has(.session) {
   text-align: center;
 }
 
-.session .clues ul {
+.session .clues ul,
+.build-panel .clues ul {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -611,7 +725,8 @@ body:has(.session) {
   display: none;
 }
 
-.session .clues {
+.session .clues,
+.build-panel .clues {
   display: grid;
   flex: 1 1 0;
   grid-template-columns: 1fr 1fr;
@@ -625,12 +740,14 @@ body:has(.session) {
   scrollbar-gutter: stable;
 }
 
-.session .clues section {
+.session .clues section,
+.build-panel .clues section {
   min-width: 0;
   text-align: left;
 }
 
-.session .clues li {
+.session .clues li,
+.build-panel .clues li {
   text-align: left;
 }
 
@@ -647,6 +764,18 @@ body:has(.session) {
   }
 
   .session-column + .session-column::before {
+    content: none;
+  }
+  .build-stage {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .build-panel {
+    overflow-y: auto;
+  }
+
+  .build-panel::before {
     content: none;
   }
 }
@@ -668,10 +797,6 @@ body:has(.session) {
   width: min(100%, 45%);
   max-width: none;
   min-width: 0;
-}
-
-.spread:has(.page-turn:checked) .leaf:has(form[action="/sign-in"]) > main {
-  width: min(100%, 38rem);
 }
 
 .spread form[action="/sign-in"] {
@@ -855,6 +980,25 @@ body:has(.session) {
   min-height: clamp(2.75rem, 7.55vh, 4.75rem);
 }
 
+.spread .home ul,
+.spread .library ul,
+.spread .published ul,
+.spread .completions {
+  column-count: 2;
+  column-gap: 2rem;
+}
+
+.spread .home li,
+.spread .library li,
+.spread .published li,
+.spread .completions section {
+  break-inside: avoid;
+}
+
+.spread .completions > h1 {
+  column-span: all;
+}
+
 .spread .completions section {
   padding: 0.75rem 0;
   border-bottom: 1px solid #111;
@@ -880,38 +1024,99 @@ body:has(.session) {
   margin: 0;
 }
 
-.spread form.build {
+.spread form.build:has(.build-stage) {
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.spread form.build:not(:has(.build-stage)) {
   align-items: flex-start;
   gap: 0.75rem;
   width: min(100%, 40rem);
 }
 
-.spread form.build .grid {
-  width: auto;
-  max-width: none;
+.spread form.build[data-build-step="edit"] .build-edit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  width: 100%;
 }
 
-.spread form.build .grid td {
-  width: 1.75rem;
-  height: 1.75rem;
-  padding: 0;
+.spread form.build[data-build-step="edit"] .grid {
+  width: min(calc(100dvh - 37rem), 100%);
 }
 
 .spread form.build .grid input {
   box-sizing: border-box;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   border: 0;
   padding: 0;
-  font: inherit;
+  background: transparent;
+  color: inherit;
+  font-family: "Segoe Print", "Bradley Hand", cursive;
+  font-size: 62cqi;
+  line-height: 1;
   text-align: center;
   text-transform: uppercase;
 }
 
-.spread form.build .clues {
+.spread form.build .grid td.block input {
+  color: transparent;
+  caret-color: transparent;
+}
+
+.spread form.build[data-build-step="edit"] .clues {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.build-clue-display {
+  display: block;
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.build-clue-display[hidden],
+.build-clue-editor[hidden] {
+  display: none;
+}
+
+.spread form.build .build-clue-editor {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 4.5em;
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+  color: #111;
+  background: #fff;
+  border: 1px solid #111;
+  border-radius: 0;
+  resize: vertical;
+}
+
+.build-panel .standard-rules,
+.build-panel .build-error {
+  margin: 0;
+}
+
+.build-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: auto;
+  padding-bottom: 0.6rem;
 }
 
 .spread .leaf:has(.notice) a {
@@ -919,83 +1124,137 @@ body:has(.session) {
 }
 
 .spread .menu {
-  position: absolute;
-  z-index: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  position: fixed;
+  z-index: 1;
+  inset: 0 auto 0 0;
   box-sizing: border-box;
-  width: 50%;
+  width: 33vw;
+  min-width: 12.5rem;
+  max-width: 22rem;
   margin: 0;
-  padding: 4rem 2rem 2rem 4rem;
+  padding: 4.5rem 1.25rem 1.5rem;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.7rem;
-  visibility: hidden;
-  transition: visibility 0s linear 0.35s;
-}
-
-.spread:has(.page-turn:checked) .menu {
-  visibility: visible;
-  transition-delay: 0s;
+  gap: 0.55rem;
+  overflow: auto;
+  background: transparent;
 }
 
 .spread .menu a {
   color: #111;
-  text-decoration: none;
-  border-bottom: 1px solid #111;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  border-bottom: 0;
 }
 
-.curl {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  right: 0;
-  width: 4.5rem;
-  height: 4.5rem;
+.spread .menu a:focus-visible {
+  outline: 2px solid #111;
+  outline-offset: 2px;
+}
+
+.spread .menu form {
   margin: 0;
+}
+
+.spread .menu button.plain {
+  padding: 0;
+  color: #111;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
   cursor: pointer;
 }
 
-.curl::before,
-.curl::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 4.5rem;
-  height: 4.5rem;
+.spread .menu button.plain:focus-visible {
+  outline: 2px solid #111;
+  outline-offset: 2px;
+}
+
+.reveal-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
   pointer-events: none;
+  clip-path: polygon(
+    0% 0%,
+    var(--fold-top) 0%,
+    var(--fold-bot) var(--curl-h),
+    0% var(--curl-h)
+  );
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.07), transparent 60%);
+}
+
+/* Skewed backside strip; local shading across width. Curl-only shadow exception. */
+.curl {
+  position: fixed;
+  top: 0;
+  left: var(--fold-top);
+  width: var(--curl-w);
+  height: var(--curl-h);
+  z-index: 3;
+  margin: 0;
+  pointer-events: none;
+  transform-origin: top left;
+  transform: skewX(atan(calc((var(--fold-bot) - var(--fold-top)) / var(--curl-h))));
+  border-radius: 0 calc(var(--curl-w) * 0.85) calc(var(--curl-w) * 0.55) 0 /
+    0 42% 38% 0;
+  background:
+    linear-gradient(
+      90deg,
+      #5a5a5a 0%,
+      #8e8e8e 5%,
+      #d8d8d8 12%,
+      #fff 34%,
+      #fafafa 48%,
+      #ebebeb 68%,
+      #cfcfcf 100%
+    );
 }
 
 .curl::before {
-  background: #c8c8c8;
-  clip-path: polygon(100% 0, 0 100%, 100% 100%);
-}
-
-.curl::after {
-  background: #eee;
-  clip-path: polygon(100% 0, 58% 58%, 100% 100%);
-}
-
-.curl .page-turn {
+  content: "";
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  top: 0;
+  bottom: 0;
+  right: 100%;
+  width: calc(var(--curl-w) * 1.35);
+  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.28));
+  filter: blur(5px);
+  pointer-events: none;
+}
+
+.menu-toggle {
+  position: fixed;
+  top: 0.55rem;
+  left: 0.55rem;
+  z-index: 4;
   margin: 0;
-  padding: 0;
-  border: 0;
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid #111;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  font: 600 0.9rem/1 Georgia, "Times New Roman", Times, serif;
   cursor: pointer;
 }
 
-.curl .page-turn:focus-visible {
+.menu-toggle:focus-visible {
   outline: 2px solid #111;
-  outline-offset: -3px;
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .spread.is-open {
+    --fold-top: 70vw;
+    --fold-bot: 52vw;
+    --curl-w: 7vw;
+  }
+
+  .spread .menu {
+    width: 70vw;
+    min-width: 11rem;
+    max-width: 18rem;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1006,25 +1265,11 @@ body:has(.session) {
   .spread .leaf:has(form[action="/sign-in"]) > main {
     width: 100%;
   }
+}
 
-  .spread:has(.page-turn:checked) .leaf {
-    width: 100%;
-    min-height: 0;
-    border-right: 0;
-  }
-
-  .spread .menu {
-    left: 0;
-    width: auto;
-    height: 0;
-    padding: 0;
-    overflow: hidden;
-  }
-
-  .spread:has(.page-turn:checked) .menu {
-    position: static;
-    height: auto;
-    overflow: visible;
-    padding: 0.25rem 1.25rem 1.5rem;
+@media (prefers-reduced-motion: reduce) {
+  .spread {
+    --curl-dur: 1ms;
+    transition: none;
   }
 }

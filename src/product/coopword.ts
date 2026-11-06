@@ -12,9 +12,12 @@ export class DisplayNameTaken extends Error {
 }
 
 export class CrosswordRejected extends Error {
-  constructor() {
+  readonly reason: string | null;
+
+  constructor(reason: string | null = null) {
     super("That Crossword cannot go in the library");
     this.name = "CrosswordRejected";
+    this.reason = reason;
   }
 }
 
@@ -600,7 +603,9 @@ function checkedLibraryCrossword(crossword: LibraryCrosswordInput): OpenedLibrar
   if (title.trim() === "") throw new CrosswordRejected();
   if (!Number.isInteger(size)) throw new CrosswordRejected();
   if (kind === "standard") {
-    if (size !== 15 && size !== 21) throw new CrosswordRejected();
+    if (size !== 15 && size !== 21) {
+      throw new CrosswordRejected("Standard Crosswords must be 15×15 or 21×21.");
+    }
   } else if (kind === "freestyle") {
     if (size < 9 || size > 21) throw new CrosswordRejected();
   } else {
@@ -633,7 +638,11 @@ function checkedLibraryCrossword(crossword: LibraryCrosswordInput): OpenedLibrar
     if (!/^[A-Za-z]$/.test(square)) throw new CrosswordRejected();
     const cell = covered[index];
     if (!cell.across && !cell.down) throw new CrosswordRejected();
-    if (kind === "standard" && (!cell.across || !cell.down)) throw new CrosswordRejected();
+    if (kind === "standard" && (!cell.across || !cell.down)) {
+      throw new CrosswordRejected(
+        "Every white Square in a Standard Crossword must be in both an Across Word and a Down Word.",
+      );
+    }
   });
 
   if (kind === "standard") {
@@ -641,7 +650,11 @@ function checkedLibraryCrossword(crossword: LibraryCrosswordInput): OpenedLibrar
       for (let column = 0; column < size; column++) {
         const black = squares[row * size + column] === "#";
         const opposite = squares[(size - 1 - row) * size + (size - 1 - column)] === "#";
-        if (black !== opposite) throw new CrosswordRejected();
+        if (black !== opposite) {
+          throw new CrosswordRejected(
+            "Standard Crosswords require black Squares to match under a half-turn.",
+          );
+        }
       }
     }
   }
