@@ -8,7 +8,7 @@ A signed-out request to any page except Sign in and Revise is sent to Sign in.
 
 `GET /` with no Player cookie. The Player enters an email and posts to `/sign-in`. The magic link is not a page. It is `/magic?token=...` in `data/magic-link-outbox.jsonl`. That link opens Home, or the Session when the token carries an Invite.
 
-Reached from: a direct visit, or any other page when the Player is signed out.
+Reached from: a direct visit, any other page when the Player is signed out, or the menu Sign out action. That action posts `/sign-out`, which redirects to `/` after the Player cookie is cleared.
 
 Goes to: Home or a Session, after the magic link.
 

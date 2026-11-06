@@ -176,17 +176,40 @@ function rejection(body: string, invite: string): void {
   );
 }
 
-test("Sign out is a menu placeholder while the route clears the browser session cookie", async () => {
+test("a signed-in Player signs out from the menu", async () => {
   const port = await freePort();
   const child = await startServer(port);
   try {
     const cookie = await signIn(port, "signout");
     const home = await send(port, "GET", "/", cookie);
-    for (const label of ["Sign out", "Help", "Profile"]) {
-      assert.match(home.body, new RegExp(`<a>${label}</a>`));
+    const menu = home.body.match(/<nav class="menu"[^>]*>([\s\S]*?)<\/nav>/);
+    assert.ok(menu);
+    assert.deepEqual(menuLinks(home.body), [
+      ["/", "Home"],
+      ["/library", "Library"],
+      ["/build", "Build"],
+      ["/publish", "Publish"],
+      ["/published", "Published"],
+      ["/completions", "Completions"],
+      ["/about", "About"],
+      ["/support", "Support"],
+    ]);
+    const signOut = [...home.body.matchAll(/<form method="post" action="\/sign-out">([\s\S]*?)<\/form>/g)];
+    assert.equal(signOut.length, 1);
+    assert.match(signOut[0][1], /<button type="submit" class="plain">Sign out<\/button>/);
+    assert.equal(menu[1].includes(signOut[0][0]), true);
+    assert.equal(home.body.replace(menu[0], "").includes('action="/sign-out"'), false);
+    for (const label of ["Help", "Profile"]) {
+      assert.match(menu[1], new RegExp(`<a>${label}</a>`));
       assert.doesNotMatch(home.body, new RegExp(`<a [^>]*href[^>]*>${label}</a>`));
     }
-    assert.doesNotMatch(home.body, /action="\/sign-out"/);
+
+    const missed = await send(port, "GET", "/sign-out", cookie);
+    assert.equal(missed.status, 404);
+    assert.equal(missed.setCookie, null);
+    const stillIn = await send(port, "GET", "/", cookie);
+    assert.match(stillIn.body, /<section class="home">/);
+    assert.doesNotMatch(stillIn.body, /action="\/sign-in"/);
 
     const signedOut = await send(port, "POST", "/sign-out", cookie);
     assert.equal(signedOut.status, 303);
