@@ -197,6 +197,18 @@ function sessionClues(
   return fill("controls/clue-columns.html", { across: lines("across"), down: lines("down") }, ["across", "down"]);
 }
 
+function displayNameSentence(displayName: string | null): string {
+  return displayName === null ? "You have not chosen a display name yet." : `Welcome back, ${displayName}`;
+}
+
+function displayNameForm(displayName: string | null, returnTo: string): string {
+  return fill("controls/name-form.html", {
+    displayName: displayName ?? "",
+    submitLabel: displayName === null ? "Choose" : "Change display name",
+    returnTo,
+  });
+}
+
 function signedIn(session: PlayerSession): string | undefined {
   try {
     const me = coOpword.whoAmI(session);
@@ -210,21 +222,31 @@ function signedIn(session: PlayerSession): string | undefined {
                 `<li><a href="/session?invite=${encodeURIComponent(live.invite)}">${escapeHtml(live.title)}</a></li>`,
             )
             .join("")}</ul>`;
-    const nameForm = fill(
-      "controls/name-form.html",
-      {
-        displayName: me.displayName ?? "",
-        submitLabel: me.displayName === null ? "Choose" : "Change display name",
-      },
-    );
+    const nameForm = me.displayName === null ? displayNameForm(null, "") : "";
     return fill(
       "home.html",
       {
-        name: me.displayName === null ? "You have not chosen a display name yet." : `Welcome back, ${me.displayName}`,
+        name: displayNameSentence(me.displayName),
         nameForm,
         sessions,
       },
       ["sessions", "nameForm"],
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function profilePage(session: PlayerSession): string | undefined {
+  try {
+    const me = coOpword.whoAmI(session);
+    return fill(
+      "profile.html",
+      {
+        name: displayNameSentence(me.displayName),
+        nameForm: displayNameForm(me.displayName, "/profile"),
+      },
+      ["nameForm"],
     );
   } catch {
     return undefined;
@@ -667,17 +689,29 @@ const server = createServer(async (request, response) => {
       return;
     }
     const body = await readBody(request);
+    const back = body.get("return") === "/profile" ? "/profile" : "/";
     try {
       coOpword.chooseDisplayName({ token }, body.get("displayName") ?? "");
       await save();
-      send(response, 303, message("Saved."), { location: "/" });
+      send(response, 303, message("Saved."), { location: back });
     } catch (error) {
       if (error instanceof DisplayNameTaken) {
-        send(response, 400, messageLink("That display name is already taken.", "/", "Back"));
+        send(response, 400, messageLink("That display name is already taken.", back, "Back"));
         return;
       }
       send(response, 400, message("Sign in again."));
     }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/profile") {
+    const token = readCookie(request, "player");
+    const profile = token ? profilePage({ token }) : undefined;
+    if (!profile) {
+      send(response, 303, message("Sign in."), { location: "/" });
+      return;
+    }
+    send(response, 200, frame(profile));
     return;
   }
 
