@@ -2,7 +2,7 @@
 
 Player-facing pages only. A partial (`cell.html`, `clue.html`, and the other fragments) is not a page. A route that only redirects is listed under the page it lands on.
 
-A signed-out request to any page except Sign in and Revise is sent to Sign in.
+A signed-out request to any page except Sign in, Revise, and Help is sent to Sign in.
 
 ## Sign in
 
@@ -99,3 +99,11 @@ Goes to: Completions.
 Reached from: Session, Match.
 
 Goes to: Home.
+
+## Help
+
+`GET /help`. A read-only guide. A signed-out visitor and a signed-in Player see the same page. It reads and writes nothing.
+
+Reached from: the menu, including Sign in.
+
+Goes to: nowhere on its own.

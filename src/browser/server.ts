@@ -681,6 +681,11 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/help") {
+    send(response, 200, frame(fill("help.html")));
+    return;
+  }
+
   if (request.method === "GET" && (url.pathname === "/about" || url.pathname === "/support")) {
     const token = readCookie(request, "player");
     if (!token) {

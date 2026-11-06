@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -193,16 +194,16 @@ test("a signed-in Player signs out from the menu", async () => {
       ["/completions", "Completions"],
       ["/about", "About"],
       ["/support", "Support"],
+      ["/help", "Help"],
     ]);
     const signOut = [...home.body.matchAll(/<form method="post" action="\/sign-out">([\s\S]*?)<\/form>/g)];
     assert.equal(signOut.length, 1);
     assert.match(signOut[0][1], /<button type="submit" class="plain">Sign out<\/button>/);
     assert.equal(menu[1].includes(signOut[0][0]), true);
     assert.equal(home.body.replace(menu[0], "").includes('action="/sign-out"'), false);
-    for (const label of ["Help", "Profile"]) {
-      assert.match(menu[1], new RegExp(`<a>${label}</a>`));
-      assert.doesNotMatch(home.body, new RegExp(`<a [^>]*href[^>]*>${label}</a>`));
-    }
+    assert.match(menu[1], /<a href="\/help">Help<\/a>/);
+    assert.match(menu[1], /<a>Profile<\/a>/);
+    assert.doesNotMatch(home.body, /<a [^>]*href[^>]*>Profile<\/a>/);
 
     const missed = await send(port, "GET", "/sign-out", cookie);
     assert.equal(missed.status, 404);
@@ -216,11 +217,88 @@ test("a signed-in Player signs out from the menu", async () => {
     assert.equal(signedOut.location, "/");
     assert.match(signedOut.setCookie ?? "", /^player=; Max-Age=0;/);
     assert.match(signedOut.setCookie ?? "", /HttpOnly; Path=\/; SameSite=Lax/);
-    assert.match((await send(port, "GET", "/", null)).body, /action="\/sign-in"/);
+    const signInPage = await send(port, "GET", "/", null);
+    assert.match(signInPage.body, /action="\/sign-in"/);
+    assert.deepEqual(menuLinks(signInPage.body), menuLinks(home.body));
   } finally {
     child.kill();
     await once(child, "exit");
   }
+});
+
+test("Help is the same public guide for any Player cookie", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const signedOut = await send(port, "GET", "/help", null);
+    const tasks = [
+      "Sign in and a display name",
+      "Choose a Crossword",
+      "Start or join a Session",
+      "Fill the Grid",
+      "Completions",
+      "Build, Publish, and Revise",
+    ];
+    assert.equal(signedOut.status, 200);
+    assert.equal(signedOut.location, null);
+    assert.match(signedOut.body, /<h1>Help<\/h1>/);
+    for (const task of tasks) assert.match(signedOut.body, new RegExp(`<h2 id="[^"]+">${task}</h2>`));
+    assert.match(signedOut.body, /<p class="brand">Co-opword<\/p>/);
+    assert.match(signedOut.body, /<footer>/);
+    assert.equal(signedOut.body.includes("<style"), false);
+    assert.equal(signedOut.body.includes(" style="), false);
+    assert.equal(signedOut.body.includes("Game"), false);
+    assert.match(signedOut.body, /greets "Welcome back, " plus the name/);
+    assert.equal(/Welcome back, [A-Za-z0-9]/.test(signedOut.body), false);
+    assert.equal(signedOut.body.includes("@"), false);
+    assert.equal(signedOut.body.includes("Invite code"), false);
+    assert.equal(signedOut.body.includes("Sign in again."), false);
+    assert.equal(signedOut.body.includes("About Us is coming soon."), false);
+    assert.equal(signedOut.body.includes("Support is coming soon."), false);
+    assert.match(signedOut.body, /That display name is already taken/);
+    assert.match(signedOut.body, /no Author/);
+    assert.match(signedOut.body, /Presence/);
+    assert.match(signedOut.body, /Lock/);
+    assert.match(signedOut.body, /seven days/);
+    assert.match(signedOut.body, /The Grid matched/);
+    assert.match(signedOut.body, /Freestyle/);
+    assert.match(signedOut.body, /Standard/);
+    assert.match(signedOut.body, /Revise link/);
+    const main = signedOut.body.match(/<main>([\s\S]*?)<\/main>/);
+    assert.ok(main);
+    assert.deepEqual(
+      [...main[1].matchAll(/href="([^"]*)"/g)].map((match) => match[1]),
+      ["#sign-in", "#choose", "#session", "#grid", "#completions", "#build"],
+    );
+    const cookie = await signIn(port, "help");
+    const signedIn = await send(port, "GET", "/help", cookie);
+    const nonsense = await send(port, "GET", "/help", "player=nonsense");
+    assert.equal(signedIn.status, 200);
+    assert.equal(nonsense.status, 200);
+    assert.equal(signedIn.body, signedOut.body);
+    assert.equal(nonsense.body, signedOut.body);
+    const posted = await send(port, "POST", "/help", null);
+    const notFound = await send(port, "GET", "/sign-out", null);
+    assert.equal(posted.status, notFound.status);
+    assert.equal(posted.body, notFound.body);
+    assert.equal(posted.status, 404);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
+test("the site map names Help as a signed-out page", () => {
+  const map = readFileSync(join(root, "SITEMAP.md"), "utf8");
+  assert.match(map, /except Sign in, Revise, and Help/);
+  const help = map.slice(map.indexOf("## Help"));
+  assert.match(help, /read-only/i);
+  assert.match(help, /menu/);
+  assert.match(help, /Sign in/);
+  assert.match(help, /nowhere/i);
+  assert.equal(help.includes("email"), false);
+  assert.equal(help.includes("display name"), false);
+  assert.equal(help.includes("Invite"), false);
 });
 
 test("a Player can rename their display name after signing in", async () => {
@@ -386,6 +464,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
         ["/completions", "Completions"],
         ["/about", "About"],
         ["/support", "Support"],
+        ["/help", "Help"],
       ],
     );
     const support = await send(port, "GET", "/support", cookie);
@@ -406,6 +485,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
         ["/completions", "Completions"],
         ["/about", "About"],
         ["/support", "Support"],
+        ["/help", "Help"],
       ],
     );
     const matched = await send(port, "GET", "/match", cookie);
@@ -449,6 +529,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
       ["/completions", "Completions"],
       ["/about", "About"],
       ["/support", "Support"],
+      ["/help", "Help"],
     ]);
     assert.match(first.body, /\(C\) Co-opword/);
     assert.deepEqual(clueList(first.body, "Across"), ["across 9: Nine As"]);

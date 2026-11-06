@@ -1006,8 +1006,14 @@ body:has(.build-stage) {
 
 .spread .completions h2,
 .spread .completions p,
-.spread .completions ul {
+.spread .completions ul,
+.spread .help h2,
+.spread .help p {
   margin: 0.25rem 0;
+}
+
+.spread .help a {
+  color: #111;
 }
 
 .spread .leaf:has(.notice) > main {
