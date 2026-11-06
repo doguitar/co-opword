@@ -195,6 +195,7 @@ test("a signed-in Player signs out from the menu", async () => {
       ["/about", "About"],
       ["/support", "Support"],
       ["/help", "Help"],
+      ["/profile", "Profile"],
     ]);
     const signOut = [...home.body.matchAll(/<form method="post" action="\/sign-out">([\s\S]*?)<\/form>/g)];
     assert.equal(signOut.length, 1);
@@ -202,8 +203,7 @@ test("a signed-in Player signs out from the menu", async () => {
     assert.equal(menu[1].includes(signOut[0][0]), true);
     assert.equal(home.body.replace(menu[0], "").includes('action="/sign-out"'), false);
     assert.match(menu[1], /<a href="\/help">Help<\/a>/);
-    assert.match(menu[1], /<a>Profile<\/a>/);
-    assert.doesNotMatch(home.body, /<a [^>]*href[^>]*>Profile<\/a>/);
+    assert.match(menu[1], /<a href="\/profile">Profile<\/a>/);
 
     const missed = await send(port, "GET", "/sign-out", cookie);
     assert.equal(missed.status, 404);
@@ -220,6 +220,50 @@ test("a signed-in Player signs out from the menu", async () => {
     const signInPage = await send(port, "GET", "/", null);
     assert.match(signInPage.body, /action="\/sign-in"/);
     assert.deepEqual(menuLinks(signInPage.body), menuLinks(home.body));
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
+test("Profile shows this Player's display name and sends anyone else to Sign in", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const email = `profile-${Date.now()}@example.com`;
+    const sent = await send(port, "POST", "/sign-in", null, { email });
+    const magic = sent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
+    const signed = await send(port, "GET", magic, null);
+    const cookie = signed.cookie;
+    assert.ok(cookie);
+
+    const unnamed = await send(port, "GET", "/profile", cookie);
+    assert.equal(unnamed.status, 200);
+    assert.match(unnamed.body, /<section class="column">[\s\S]*<h1>Profile<\/h1>/);
+    assert.match(unnamed.body, /<p>You have not chosen a display name yet\.<\/p>/);
+    assert.match(unnamed.body, /<form method="post" action="\/display-name">/);
+    assert.match(unnamed.body, /<button type="submit" class="filled">Choose<\/button>/);
+    assert.equal(unnamed.body.includes(email), false);
+    assert.equal(unnamed.body.includes("@"), false);
+
+    const displayName = `Ada${Date.now()}`;
+    await send(port, "POST", "/display-name", cookie, { displayName });
+    const named = await send(port, "GET", "/profile", cookie);
+    assert.equal(named.status, 200);
+    assert.match(named.body, new RegExp(`<p>Welcome back, ${displayName}</p>`));
+    assert.match(named.body, new RegExp(`name="displayName" value="${displayName}"`));
+    assert.match(named.body, /<button type="submit" class="filled">Change display name<\/button>/);
+    assert.equal(named.body.includes(email), false);
+
+    const signedOut = await send(port, "GET", "/profile", null);
+    assert.equal(signedOut.status, 303);
+    assert.equal(signedOut.location, "/");
+    assert.match(signedOut.body, /Sign in\./);
+
+    const rejected = await send(port, "GET", "/profile", "player=nonsense");
+    assert.equal(rejected.status, 303);
+    assert.equal(rejected.location, "/");
+    assert.match(rejected.body, /Sign in\./);
   } finally {
     child.kill();
     await once(child, "exit");
@@ -291,6 +335,14 @@ test("Help is the same public guide for any Player cookie", async () => {
 test("the site map names Help as a signed-out page", () => {
   const map = readFileSync(join(root, "SITEMAP.md"), "utf8");
   assert.match(map, /except Sign in, Revise, and Help/);
+  const profileAt = map.indexOf("## Profile");
+  const libraryAt = map.indexOf("## Library");
+  assert.ok(profileAt >= 0 && profileAt < libraryAt);
+  const profile = map.slice(profileAt, libraryAt);
+  assert.match(profile, /signed-in/i);
+  assert.match(profile, /menu/);
+  assert.match(profile, /display name/);
+  assert.equal(profile.includes("email"), false);
   const help = map.slice(map.indexOf("## Help"));
   assert.match(help, /read-only/i);
   assert.match(help, /menu/);
@@ -312,7 +364,34 @@ test("a Player can rename their display name after signing in", async () => {
     assert.equal(changed.location, "/");
     const home = await send(port, "GET", "/", cookie);
     assert.match(home.body, new RegExp(`<p>Welcome back, ${displayName}</p>`));
-    assert.match(home.body, new RegExp(`name="displayName" value="${displayName}"`));
+    assert.equal(home.body.includes('action="/display-name"'), false);
+    const profile = await send(port, "GET", "/profile", cookie);
+    assert.match(profile.body, new RegExp(`name="displayName" value="${displayName}"`));
+    assert.match(profile.body, /name="return" value="\/profile"/);
+    const again = `Again${Date.now()}`;
+    const fromProfile = await send(port, "POST", "/display-name", cookie, { displayName: again, return: "/profile" });
+    assert.equal(fromProfile.status, 303);
+    assert.equal(fromProfile.location, "/profile");
+    const homeAfter = await send(port, "GET", "/", cookie);
+    assert.match(homeAfter.body, new RegExp(`<p>Welcome back, ${again}</p>`));
+    assert.equal(homeAfter.body.includes('action="/display-name"'), false);
+    const elsewhere = await send(port, "POST", "/display-name", cookie, { displayName: again, return: "/library" });
+    assert.equal(elsewhere.status, 303);
+    assert.equal(elsewhere.location, "/");
+    const other = await signIn(port, "other");
+    const taken = await send(port, "POST", "/display-name", other, { displayName: again.toLowerCase(), return: "/profile" });
+    assert.equal(taken.status, 400);
+    assert.match(taken.body, /That display name is already taken\./);
+    assert.match(taken.body, /<a href="\/profile">Back<\/a>/);
+    const stray = await send(port, "POST", "/display-name", other, { displayName: again.toLowerCase(), return: "/library" });
+    assert.equal(stray.status, 400);
+    assert.match(stray.body, /<a href="\/">Back<\/a>/);
+    assert.equal(stray.body.includes('href="/library"'), false);
+    const still = await send(port, "GET", "/profile", cookie);
+    assert.match(still.body, new RegExp(`name="displayName" value="${again}"`));
+    const otherProfile = await send(port, "GET", "/profile", other);
+    assert.equal(otherProfile.body.includes(`value="${again}"`), false);
+    assert.equal(otherProfile.body.includes(again.toLowerCase()), false);
   } finally {
     child.kill();
     await once(child, "exit");
@@ -338,7 +417,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     assert.match(idleHome.body, /No open sessions\. <a href="\/published">Start one from a published crossword\.<\/a>/);
     assert.match(idleHome.body, new RegExp(`<p>Welcome back, ${displayName}</p>`));
     assert.equal(idleHome.body.includes("Other players"), false);
-    assert.match(idleHome.body, new RegExp(`<form method="post" action="/display-name">[\\s\\S]*name="displayName" value="${displayName}"`));
+    assert.equal(idleHome.body.includes('action="/display-name"'), false);
     const started = await send(port, "POST", "/session", cookie, { title: "First Row" });
     const invite = new URL(started.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
     assert.equal(started.status, 303);
@@ -465,6 +544,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
         ["/about", "About"],
         ["/support", "Support"],
         ["/help", "Help"],
+        ["/profile", "Profile"],
       ],
     );
     const support = await send(port, "GET", "/support", cookie);
@@ -486,6 +566,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
         ["/about", "About"],
         ["/support", "Support"],
         ["/help", "Help"],
+        ["/profile", "Profile"],
       ],
     );
     const matched = await send(port, "GET", "/match", cookie);
@@ -530,6 +611,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
       ["/about", "About"],
       ["/support", "Support"],
       ["/help", "Help"],
+      ["/profile", "Profile"],
     ]);
     assert.match(first.body, /\(C\) Co-opword/);
     assert.deepEqual(clueList(first.body, "Across"), ["across 9: Nine As"]);

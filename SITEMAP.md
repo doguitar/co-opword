@@ -14,11 +14,19 @@ Goes to: Home or a Session, after the magic link.
 
 ## Home
 
-`GET /` for a signed-in Player. Greets a Player who has a display name with "Welcome back, " and that name, shows the control to set a name when the Player has none, and the live Sessions that Player is in. Each Session links to `/session?invite=...`. When there are none, Home links to Published and says to start one from a published crossword. Posting `/display-name` returns here.
+`GET /` for a signed-in Player. Greets a Player who has a display name with "Welcome back, " and that name, shows the control to set a name only while that name is absent, and the live Sessions that Player is in. Each Session links to `/session?invite=...`. When there are none, Home links to Published and says to start one from a published crossword. Posting `/display-name` from this page returns here.
 
 Reached from: the magic link when it has no Invite, Library, Completions, and Close on a Session.
 
 Goes to: an open Session, or Published when there is none.
+
+## Profile
+
+`GET /profile` for a signed-in Player. Reached from the menu. Shows "Welcome back, " and that Player's display name when they have one, and "You have not chosen a display name yet." when they do not, with the control to choose or change it. Posting `/display-name` from this page returns here.
+
+Reached from: the menu.
+
+Goes to: this page, after that post.
 
 ## Library
 

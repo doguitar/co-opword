@@ -1,4 +1,5 @@
 <form method="post" action="/display-name">
   <label>Display name <input name="displayName" value="{{displayName}}" required></label>
+  <input type="hidden" name="return" value="{{returnTo}}">
   <button type="submit" class="filled">{{submitLabel}}</button>
 </form>

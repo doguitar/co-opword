@@ -47,7 +47,7 @@ shutil.copyfile(shot, "regression/sign-in.png")
 
 `tab.waitFor(300)` is not a delay. The number is read as a selector. Use `asyncio.sleep` between submits.
 
-Sign in before any other shot. Fill the email, submit, and open the last `/magic?token=...` line in `data/magic-link-outbox.jsonl`. Set the display name to Relay. Use the Home display-name form to change it and verify the greeting and field update, then restore Relay before saving `home.png`.
+Sign in before any other shot. Fill the email, submit, and open the last `/magic?token=...` line in `data/magic-link-outbox.jsonl`. While Home still asks for a display name, set it to Relay. Open Profile, change the display name, and verify the greeting and field update, then restore Relay. Save `home.png` with the name set, the greeting, and no change form. Save `profile.png` with the name and the change control, and the menu closed.
 
 Then, in order:
 
@@ -64,6 +64,7 @@ Close the relay tab with `browser.close(name="coopword")`. The memory server hol
 | --- | --- | --- |
 | Sign in | `/` with no Player cookie | `regression/sign-in.png` |
 | Home | `/` after a display name is set | `regression/home.png` |
+| Profile | `/profile` | `regression/profile.png` |
 | Library | `/library` | `regression/library.png` |
 | Crossword | `/crossword?title=` for one Library Crossword | `regression/crossword.png` |
 | Published preview | `/crossword?title=Tiny&author=Ada` | `regression/published-preview.png` |
