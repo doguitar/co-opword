@@ -876,6 +876,12 @@ body:has(.build-stage) {
   max-width: none;
 }
 
+.spread .leaf:has(.help) > main {
+  align-self: flex-start;
+  width: 100%;
+  max-width: 44rem;
+}
+
 .spread .column {
   width: 100%;
 }
