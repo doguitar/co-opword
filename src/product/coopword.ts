@@ -12,9 +12,12 @@ export class DisplayNameTaken extends Error {
 }
 
 export class CrosswordRejected extends Error {
-  constructor() {
+  readonly reason: string | null;
+
+  constructor(reason: string | null = null) {
     super("That Crossword cannot go in the library");
     this.name = "CrosswordRejected";
+    this.reason = reason;
   }
 }
 
@@ -46,6 +49,8 @@ type PublishedCrossword = {
   crossword: OpenedLibraryCrossword;
   author: string;
   withdrawToken: string;
+  version: number;
+  current: boolean;
 };
 
 type LiveSession = {
@@ -99,7 +104,7 @@ export type OpenedSession = {
   size: number;
   squares: { letter: string | null; locked: boolean; present: string[]; block: boolean }[];
   words: OpenedLibraryCrossword["words"];
-  players: { displayName: string | null }[];
+  players: { displayName: string | null; letters: number }[];
 };
 
 export type CoOpword = {
@@ -111,13 +116,16 @@ export type CoOpword = {
   admitLibraryCrossword(crossword: LibraryCrosswordInput): void;
   library(session: PlayerSession): { title: string }[];
   openLibraryCrossword(session: PlayerSession, title: string): OpenedLibraryCrossword;
-  publishCrossword(session: PlayerSession, crossword: LibraryCrosswordInput, author: string): { withdrawToken: string; email: string };
+  publishCrossword(session: PlayerSession, crossword: LibraryCrosswordInput, author: string): { withdrawToken: string };
   published(session: PlayerSession): { title: string; author: string }[];
   openPublishedCrossword(session: PlayerSession, title: string, author: string): OpenedLibraryCrossword & { author: string };
   withdrawCrossword(token: string): void;
+  openRevise(token: string): OpenedLibraryCrossword & { author: string; version: number };
+  reviseCrossword(token: string, crossword: LibraryCrosswordInput, author: string): number;
   startSession(session: PlayerSession, title: string): { invite: string };
   joinSession(session: PlayerSession, invite: string): { invite: string };
   openSession(session: PlayerSession, invite: string): OpenedSession;
+  openSessions(session: PlayerSession): { invite: string; title: string }[];
   selectSquare(session: PlayerSession, invite: string, index: number): void;
   typeLetter(session: PlayerSession, invite: string, letter: string): void;
   clearSquare(session: PlayerSession, invite: string, index: number): void;
@@ -128,7 +136,7 @@ export type CoOpword = {
   offerFriendship(session: PlayerSession, invite: string, displayName: string): void;
   declineFriendship(session: PlayerSession, invite: string, displayName: string): void;
   sessionAlerts(session: PlayerSession, invite: string): { displayName: string | null; kind: "pending" | "declined" }[];
-  friends(session: PlayerSession): { displayName: string | null }[];
+  friends(session: PlayerSession): { displayName: string | null; email: string }[];
   inviteEmail(session: PlayerSession, invite: string, email: string): { email: string; token: string | null };
   snapshot(): string;
 };
@@ -148,7 +156,11 @@ export function openCoOpword(snapshot?: string): CoOpword {
     magicLinks: parsed.magicLinks ?? [],
     sessions: parsed.sessions ?? [],
     library: parsed.library ?? [],
-    published: parsed.published ?? [],
+    published: (parsed.published ?? []).map((item) => ({
+      ...item,
+      version: item.version ?? 1,
+      current: item.current ?? true,
+    })),
     liveSessions: parsed.liveSessions ?? [],
     openViews: parsed.openViews ?? [],
     completions: parsed.completions ?? [],
@@ -247,33 +259,52 @@ export function openCoOpword(snapshot?: string): CoOpword {
       return found;
     },
 
-    publishCrossword(session: PlayerSession, crossword: LibraryCrosswordInput, author: string): { withdrawToken: string; email: string } {
-      const player = playerFor(session);
+    publishCrossword(session: PlayerSession, crossword: LibraryCrosswordInput, author: string): { withdrawToken: string } {
+      playerFor(session);
       const admitted = checkedLibraryCrossword(crossword);
-      if (state.published.some((item) => item.crossword.title === admitted.title && item.author === author)) {
+      if (state.published.some((item) => item.current && item.crossword.title === admitted.title && item.author === author)) {
         throw new CrosswordRejected();
       }
       const withdrawToken = crypto.randomUUID();
-      state.published.push({ crossword: admitted, author, withdrawToken });
-      return { withdrawToken, email: player.email };
+      state.published.push({ crossword: admitted, author, withdrawToken, version: 1, current: true });
+      return { withdrawToken };
     },
 
     published(session: PlayerSession): { title: string; author: string }[] {
       playerFor(session);
-      return state.published.map((item) => ({ title: item.crossword.title, author: item.author }));
+      return state.published.filter((item) => item.current).map((item) => ({ title: item.crossword.title, author: item.author }));
     },
 
     openPublishedCrossword(session: PlayerSession, title: string, author: string): OpenedLibraryCrossword & { author: string } {
       playerFor(session);
-      const found = state.published.find((item) => item.crossword.title === title && item.author === author);
+      const found = state.published.find((item) => item.current && item.crossword.title === title && item.author === author);
       if (!found) throw new Error("That Crossword is not published");
       return { ...found.crossword, author: found.author };
     },
 
     withdrawCrossword(token: string): void {
-      const index = state.published.findIndex((item) => item.withdrawToken === token);
+      const index = state.published.findIndex((item) => item.current && item.withdrawToken === token);
       if (index === -1) throw new CrosswordRejected();
       state.published.splice(index, 1);
+    },
+    openRevise(token: string): OpenedLibraryCrossword & { author: string; version: number } {
+      const found = state.published.find((item) => item.current && item.withdrawToken === token);
+      if (!found) throw new CrosswordRejected();
+      return { ...found.crossword, author: found.author, version: found.version };
+    },
+    reviseCrossword(token: string, crossword: LibraryCrosswordInput, author: string): number {
+      const index = state.published.findIndex((item) => item.current && item.withdrawToken === token);
+      if (index === -1) throw new CrosswordRejected();
+      const admitted = checkedLibraryCrossword(crossword);
+      if (state.published.some((item, itemIndex) => item.current && itemIndex !== index && item.crossword.title === admitted.title && item.author === author)) {
+        throw new CrosswordRejected();
+      }
+      const previous = state.published[index];
+      const version = previous.version + 1;
+      previous.current = false;
+      previous.withdrawToken = "";
+      state.published.splice(index, 0, { crossword: admitted, author, withdrawToken: token, version, current: true });
+      return version;
     },
     startSession(session: PlayerSession, title: string): { invite: string } {
       const player = playerFor(session);
@@ -385,13 +416,14 @@ export function openCoOpword(snapshot?: string): CoOpword {
           kind: offer.status,
         }));
     },
-    friends(session: PlayerSession): { displayName: string | null }[] {
+    friends(session: PlayerSession): { displayName: string | null; email: string }[] {
       const player = playerFor(session);
       return state.friends
         .filter((pairIds) => pairIds.a === player.id || pairIds.b === player.id)
         .map((pairIds) => {
           const otherId = pairIds.a === player.id ? pairIds.b : pairIds.a;
-          return { displayName: state.players.find((entry) => entry.id === otherId)?.displayName ?? null };
+          const other = state.players.find((entry) => entry.id === otherId);
+          return { displayName: other?.displayName ?? null, email: other?.email ?? "" };
         });
     },
     inviteEmail(session: PlayerSession, invite: string, email: string): { email: string; token: string | null } {
@@ -407,6 +439,13 @@ export function openCoOpword(snapshot?: string): CoOpword {
       const token = crypto.randomUUID();
       state.magicLinks.push({ token, email: normalized, invite });
       return { email: normalized, token };
+    },
+    openSessions(session: PlayerSession): { invite: string; title: string }[] {
+      const player = playerFor(session);
+      sweep();
+      return state.liveSessions
+        .filter((live) => live.memberIds.includes(player.id))
+        .map((live) => ({ invite: live.invite, title: live.crossword.title }));
     },
     closeSession(session: PlayerSession, invite: string): void {
       const player = playerFor(session);
@@ -551,7 +590,10 @@ export function openCoOpword(snapshot?: string): CoOpword {
         block: square === "#",
       })),
       words: live.crossword.words,
-      players: live.memberIds.map((playerId) => ({ displayName: nameOf(playerId) })),
+      players: live.memberIds.map((playerId) => ({
+        displayName: nameOf(playerId),
+        letters: live.writtenBy.filter((id, index) => id === playerId && live.letters[index] !== null).length,
+      })),
     };
   }
 }
@@ -561,7 +603,9 @@ function checkedLibraryCrossword(crossword: LibraryCrosswordInput): OpenedLibrar
   if (title.trim() === "") throw new CrosswordRejected();
   if (!Number.isInteger(size)) throw new CrosswordRejected();
   if (kind === "standard") {
-    if (size !== 15 && size !== 21) throw new CrosswordRejected();
+    if (size !== 15 && size !== 21) {
+      throw new CrosswordRejected("Standard Crosswords must be 15×15 or 21×21.");
+    }
   } else if (kind === "freestyle") {
     if (size < 9 || size > 21) throw new CrosswordRejected();
   } else {
@@ -594,7 +638,11 @@ function checkedLibraryCrossword(crossword: LibraryCrosswordInput): OpenedLibrar
     if (!/^[A-Za-z]$/.test(square)) throw new CrosswordRejected();
     const cell = covered[index];
     if (!cell.across && !cell.down) throw new CrosswordRejected();
-    if (kind === "standard" && (!cell.across || !cell.down)) throw new CrosswordRejected();
+    if (kind === "standard" && (!cell.across || !cell.down)) {
+      throw new CrosswordRejected(
+        "Every white Square in a Standard Crossword must be in both an Across Word and a Down Word.",
+      );
+    }
   });
 
   if (kind === "standard") {
@@ -602,7 +650,11 @@ function checkedLibraryCrossword(crossword: LibraryCrosswordInput): OpenedLibrar
       for (let column = 0; column < size; column++) {
         const black = squares[row * size + column] === "#";
         const opposite = squares[(size - 1 - row) * size + (size - 1 - column)] === "#";
-        if (black !== opposite) throw new CrosswordRejected();
+        if (black !== opposite) {
+          throw new CrosswordRejected(
+            "Standard Crosswords require black Squares to match under a half-turn.",
+          );
+        }
       }
     }
   }

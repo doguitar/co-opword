@@ -23,3 +23,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 ### Site map
 
 Which pages link to which, and what each page does. See `SITEMAP.md`.
+
+### Newspaper look
+
+Greyscale newspaper style and page-layout guidance. See `docs/newspaper.md`.

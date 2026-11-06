@@ -273,7 +273,8 @@ test("a Player publishes a finished Crossword, and the Withdraw link only takes 
   coOpword.admitLibraryCrossword(tinyCrossword);
 
   const issued = coOpword.publishCrossword(ada, tinyCrossword, "");
-  assert.equal(issued.email, "ada@example.com");
+  assert.equal("email" in issued, false);
+  assert.equal(JSON.parse(coOpword.snapshot()).published.some((item: { email?: string; playerId?: string }) => item.email !== undefined || item.playerId !== undefined), false);
   assert.deepEqual(coOpword.published(ada), [{ title: "Tiny", author: "" }]);
 
   const opened = coOpword.openPublishedCrossword(ada, "Tiny", "");
@@ -284,6 +285,18 @@ test("a Player publishes a finished Crossword, and the Withdraw link only takes 
 
   const kept = openCoOpword(coOpword.snapshot());
   assert.deepEqual(kept.published(ada), [{ title: "Tiny", author: "" }]);
+
+  const original = kept.startPublishedSession(ada, "Tiny", "");
+  assert.equal(kept.openSession(ada, original.invite).words[0].clue, "Nine As");
+  const revised = { ...tinyCrossword, words: [{ ...tinyCrossword.words[0], clue: "Eight As" }] };
+  assert.equal(kept.reviseCrossword(issued.withdrawToken, revised, "Ada"), 2);
+  assert.equal(kept.openRevise(issued.withdrawToken).words[0].clue, "Eight As");
+  assert.equal(kept.openRevise(issued.withdrawToken).version, 2);
+  assert.equal(kept.openSession(ada, original.invite).words[0].clue, "Nine As");
+  assert.throws(() => kept.startPublishedSession(ada, "Tiny", ""));
+  const newest = kept.startPublishedSession(ada, "Tiny", "Ada");
+  assert.equal(kept.openSession(ada, newest.invite).words[0].clue, "Eight As");
+  assert.deepEqual(kept.published(ada), [{ title: "Tiny", author: "Ada" }]);
 
   kept.withdrawCrossword(issued.withdrawToken);
   assert.deepEqual(kept.published(ada), []);
@@ -318,6 +331,28 @@ test("the Author is whatever was published, a blank Author counts, and a later r
   assert.equal(coOpword.published(ada).some((crossword) => crossword.title === "Stray"), false);
 });
 
+test("a Player sees the live Sessions they are in", () => {
+  const coOpword = openCoOpword();
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  const sam = signedIn(coOpword, "sam@example.com", "Sam");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  assert.deepEqual(coOpword.openSessions(ada), []);
+
+  const started = coOpword.startSession(ada, "Tiny");
+  assert.deepEqual(coOpword.openSessions(ada), [{ invite: started.invite, title: "Tiny" }]);
+  assert.deepEqual(coOpword.openSessions(sam), []);
+
+  coOpword.joinSession(sam, started.invite);
+  assert.deepEqual(coOpword.openSessions(sam), [{ invite: started.invite, title: "Tiny" }]);
+
+  for (let index = 0; index < 9; index += 1) {
+    coOpword.selectSquare(ada, started.invite, index);
+    coOpword.typeLetter(ada, started.invite, "A");
+  }
+  assert.deepEqual(coOpword.openSessions(ada), []);
+  assert.deepEqual(coOpword.openSessions(sam), []);
+});
+
 test("two Players fill one Session from a library Crossword, and the first letter Locks the Square", () => {
   const coOpword = openCoOpword();
   const ada = signedIn(coOpword, "ada@example.com", "Ada");
@@ -335,7 +370,8 @@ test("two Players fill one Session from a library Crossword, and the first lette
   const before = coOpword.openSession(sam, first.invite);
   assert.equal(before.squares[0].letter, null);
   assert.equal(before.squares[0].letter === "A", false);
-  assert.deepEqual(before.players.map((player) => player.displayName).sort(), ["Ada", "Sam"]);
+  assert.deepEqual(before.players.map((player) => player.displayName), ["Ada", "Sam"]);
+  assert.deepEqual(before.players.map((player) => player.letters), [0, 0]);
   assert.equal(before.words[0].clue, "Nine As");
 
   coOpword.selectSquare(ada, first.invite, 0);
@@ -346,6 +382,10 @@ test("two Players fill one Session from a library Crossword, and the first lette
   assert.deepEqual(present.squares[1].present.sort(), ["Ada", "Sam"]);
 
   coOpword.typeLetter(ada, first.invite, "b");
+  assert.deepEqual(
+    coOpword.openSession(ada, first.invite).players.map((player) => player.letters),
+    [1, 0],
+  );
   assert.throws(() => coOpword.typeLetter(sam, first.invite, "C"), CrosswordRejected);
   assert.equal(coOpword.openSession(sam, first.invite).squares[1].letter, "B");
 
@@ -355,6 +395,7 @@ test("two Players fill one Session from a library Crossword, and the first lette
   const kept = openCoOpword(coOpword.snapshot());
   const restored = kept.openSession(ada, first.invite);
   assert.equal(restored.squares[1].letter, "C");
+  assert.deepEqual(restored.players.map((player) => player.letters), [0, 1]);
   assert.equal(restored.squares[1].locked, true);
   assert.deepEqual(restored.players.map((player) => player.displayName).sort(), ["Ada", "Sam"]);
   assert.equal(kept.openLibraryCrossword(ada, "Tiny").squares[1], "A");
@@ -505,7 +546,7 @@ test("friendship is offered inside one Session, and a decline is visible only to
   coOpword.joinSession(sam, other);
   coOpword.offerFriendship(sam, other, "Ada");
   coOpword.offerFriendship(ada, other, "Sam");
-  assert.deepEqual(coOpword.friends(ada), [{ displayName: "Sam" }]);
+  assert.deepEqual(coOpword.friends(ada), [{ displayName: "Sam", email: "sam@example.com" }]);
   assert.deepEqual(coOpword.sessionAlerts(ada, invite), [{ displayName: "Sam", kind: "declined" }]);
 
   const kept = openCoOpword();

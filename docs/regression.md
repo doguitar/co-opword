@@ -27,7 +27,7 @@ Start a server that does not write the product snapshot into `data/`. The magic-
 cmd /c "set PORT=3477&& set DATABASE_URL=sqlite::memory:&& npm start"
 ```
 
-From the agent eval kernel, open the omp relay against that server. This uses the user's Chrome through the relay and leaves their other tabs alone:
+From the agent eval kernel, open the omp relay against that server. The screenshot is of that live page. A headless browser does not count. This uses the user's Chrome through the relay and leaves their other tabs alone:
 
 ```python
 tab = await browser.open(
@@ -47,15 +47,16 @@ shutil.copyfile(shot, "regression/sign-in.png")
 
 `tab.waitFor(300)` is not a delay. The number is read as a selector. Use `asyncio.sleep` between submits.
 
-Sign in before any other shot. Fill the email, submit, and open the last `/magic?token=...` line in `data/magic-link-outbox.jsonl`. Set the display name to Relay. That Home page is `home.png`.
+Sign in before any other shot. Fill the email, submit, and open the last `/magic?token=...` line in `data/magic-link-outbox.jsonl`. Set the display name to Relay. Use the Home display-name form to change it and verify the greeting and field update, then restore Relay before saving `home.png`.
 
 Then, in order:
 
 1. Library, then Crossword `First Row`. Save `crossword.png` before starting the Session.
-2. Start the Session and save `session.png` while the top row is still empty.
+2. Start the Session and open Invite to verify the invite code. Save `session.png` with the top row empty and the dialog open, then close the dialog. Verify square cells at desktop (1162×1028), portrait (390×844), and landscape (844×390) viewports; the board stays at least 20rem wide where its container allows it, with no horizontal overflow.
 3. Match the Grid. Select sets the Square from the index field. Type writes the letter onto that selected Square, not onto the index. For squares 0 through 8, Select, then Type `A`. The last Type opens `/match`.
-4. Completions, then Publish. Publish the same nine-A Freestyle Crossword as title Tiny and Author Ada. Open Published, then that Published Crossword.
+4. Completions, then Publish. Publish the same nine-A Freestyle Crossword as title Tiny and Author Ada. Open Published, follow Preview, and verify the published grid; return and open the Revise link from the confirmation.
 5. About, then Support.
+6. Build. Verify the grid stays on the left with options on the right. Right-click a square to toggle it black, right-click again to clear it, and confirm clue numbers update. Use keyboard `#` as the touch-accessible fallback. Select Standard; verify the rules appear and blacking/unblacking one square toggles its 180° opposite. Save `build.png` with the rules and mirrored blocks visible. Continue with a small Freestyle crossing layout; verify Across/Down clues appear on the right in Session style, click a clue to edit it in a wrapping textarea, then confirm Enter and blur both restore the clue line and keep the text. Verify Back and Publish share a row above the footer rule. Continue with a 9×9 Standard grid and attempt Publish; confirm the size error is shown and the puzzle is not published. Save `build-clues.png` with the clue layout and validation message visible.
 
 Close the relay tab with `browser.close(name="coopword")`. The memory server holds no snapshot file.
 
@@ -65,9 +66,12 @@ Close the relay tab with `browser.close(name="coopword")`. The memory server hol
 | Home | `/` after a display name is set | `regression/home.png` |
 | Library | `/library` | `regression/library.png` |
 | Crossword | `/crossword?title=` for one Library Crossword | `regression/crossword.png` |
+| Published preview | `/crossword?title=Tiny&author=Ada` | `regression/published-preview.png` |
+| Build | `/build` | `regression/build.png` |
 | Publish | `/publish` | `regression/publish.png` |
+| Build clues | `POST /build` after Continue | `regression/build-clues.png` |
 | Published | `/published` | `regression/published.png` |
-| Published Crossword | `/published-crossword` for one published title and Author | `regression/published-crossword.png` |
+| Revise | `/revise?token=` from a published Crossword | `regression/revise.png` |
 | Session | `/session?invite=` for a live Session | `regression/session.png` |
 | Match | `/match` after the Grid has matched | `regression/match.png` |
 | Completions | `/completions` | `regression/completions.png` |

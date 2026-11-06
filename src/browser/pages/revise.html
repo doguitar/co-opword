@@ -1,0 +1,8 @@
+<section class="column revise">
+  <p>Version {{version}}</p>
+  {{form}}
+  <form method="post" action="/revise">
+    <input type="hidden" name="token" value="{{token}}">
+    <button type="submit" name="intent" value="delete">Delete</button>
+  </form>
+</section>

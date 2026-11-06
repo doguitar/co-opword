@@ -1,16 +1,14 @@
-<div class="sheet">
-{{header}}
-<h1>{{title}}</h1>
-<div class="board">
-  <table class="grid">{{rows}}</table>
-  <div class="controls">
-    <form method="post" action="/session">
-      <input type="hidden" name="title" value="{{title}}">
-      <button type="submit">Start a Session</button>
-    </form>
-    <p><a href="/library">Library</a></p>
+<section class="crossword">
+  <h1>{{title}}</h1>
+  <div class="board">
+    <table class="grid">{{rows}}</table>
+    <div class="controls">
+      <form method="post" action="/session">
+        <input type="hidden" name="title" value="{{title}}">
+        <button type="submit" class="filled">Start a Session</button>
+      </form>
+      <p><a href="/library">Library</a></p>
+    </div>
   </div>
-</div>
-{{clues}}
-{{footer}}
-</div>
+  {{clues}}
+</section>
