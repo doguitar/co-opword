@@ -1,0 +1,23 @@
+<section class="column help">
+  <h1>Help</h1>
+  <p>
+    <a href="#sign-in">Sign in and a display name</a>
+    <a href="#choose">Choose a Crossword</a>
+    <a href="#session">Start or join a Session</a>
+    <a href="#grid">Fill the Grid</a>
+    <a href="#completions">Completions</a>
+    <a href="#build">Build, Publish, and Revise</a>
+  </p>
+  <h2 id="sign-in">Sign in and a display name</h2>
+  <p>Sign in is an email and a magic link. The link opens Home, or the Session when it carries an Invite. Home says to choose a display name when there is none, and greets "Welcome back, " plus the name when there is one. The name is unique, ignoring capitals. A taken name stays on "That display name is already taken" and does not change. Other Players see only that name.</p>
+  <h2 id="choose">Choose a Crossword</h2>
+  <p>Library lists the Crosswords shipped with the product. Opening one shows its title, Grid, and clues, then starts a Session. Published lists Crosswords Players have published, each with its title and Author (a blank Author is shown as no Author). A library Crossword has no Author. The two lists are separate, and a library title may match a published title.</p>
+  <h2 id="session">Start or join a Session</h2>
+  <p>Starting from a Crossword the Player can open creates a new Session and one Invite, shown as a code and as a join link. Home lists that Player's open Sessions, or points at Published when there are none. Joining with the link while signed in opens the Session. An invalid Invite is not found. Emailing an Invite from the Session adds a Player who already has that address, or sends a magic link that opens the Session. A Player leaves a Session seven days after their last letter or Square selection there. If nobody does either for seven days, the Session ends and nothing is kept.</p>
+  <h2 id="grid">Fill the Grid</h2>
+  <p>Select one Square. That selection is the Player's Presence. Type writes one letter on the selected Square and Locks it. With no Square selected, typing does nothing. Another letter is rejected until any Player in the Session clears that Square. Clear empties it and removes the Lock. Nothing says whether a letter or a Word is correct until the Grid matches. There is no hint, and nothing reveals a letter this Player did not type. Close returns Home; letters stay Locked. When every Square is filled and every Word matches, the Session ends, Match says "The Grid matched", and that page links to Completions.</p>
+  <h2 id="completions">Completions</h2>
+  <p>A Completion keeps the title and Author from when the Grid matched (no Author for a library Crossword), the duration from Session start until the match, and the roster. The roster is each Player who wrote at least one letter still Locked, under the display name they had then, with that count. Every Player on the roster sees the same Completion. A later display-name change does not change it. The filled Grid is not kept. The Completions page itself stays signed-in.</p>
+  <h2 id="build">Build, Publish, and Revise</h2>
+  <p>Build sets a title, an Author (starting as the display name, and changeable or clearable), Freestyle or Standard, and a size from 9 through 21. Each Square is one letter or a block. Continuing lists one clue for every Word of at least two Squares. Publish uses the same rules as the Publish page. An optional address emails the Revise link and is not stored. Standard is 15×15 or 21×21, black Squares match under a half-turn, and every letter sits in both an Across Word and a Down Word. Freestyle has no half-turn rule, and a letter may sit in only one Word. Publish takes an Author and Crossword JSON, with the same optional address. Success shows the Revise link and names the address only when one was typed. A rejected Crossword is an error with no link. Whoever has the Revise link can open the builder on the current version, save a new version, or delete it, without signing in. The Published list shows only the newest version. A Session already started stays on the version it started from. Delete takes the newest version off the public list so no new Session can start from it. A Completion is unchanged.</p>
+</section>
