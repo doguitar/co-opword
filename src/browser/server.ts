@@ -84,7 +84,7 @@ const maxBodyBytes = 262144;
 
 class BodyTooLargeError extends Error {}
 
-async function readBody(request: IncomingMessage): Promise<URLSearchParams> {
+async function limitedBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -92,7 +92,11 @@ async function readBody(request: IncomingMessage): Promise<URLSearchParams> {
     if (size > maxBodyBytes) throw new BodyTooLargeError();
     chunks.push(chunk as Buffer);
   }
-  return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+  return Buffer.concat(chunks);
+}
+
+function readBody(raw: Buffer): URLSearchParams {
+  return new URLSearchParams(raw.toString("utf8"));
 }
 
 const securityHeaders = {
@@ -642,7 +646,17 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  let rawBody: Buffer;
   try {
+    rawBody = await limitedBody(request);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      rejectTooLarge(request, response);
+      return;
+    }
+    throw error;
+  }
+
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   coOpword.noteTime(Date.now());
 
@@ -694,7 +708,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/sign-in") {
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     const email = body.get("email") ?? "";
     const issued = coOpword.requestMagicLink(email);
     await save();
@@ -742,7 +756,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     const back = body.get("return") === "/profile" ? "/profile" : "/";
     try {
       coOpword.chooseDisplayName({ token }, body.get("displayName") ?? "");
@@ -862,7 +876,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/build") {
-    const built = readBuild(await readBody(request));
+    const built = readBuild(readBody(rawBody));
     const token = readCookie(request, "player");
     if (!built.token && (!token || !signedIn({ token }))) {
       send(response, 303, message("Sign in."), { location: "/" });
@@ -934,7 +948,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     let issued;
     try {
       const crossword = JSON.parse(body.get("crossword") ?? "");
@@ -966,7 +980,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/revise") {
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     try {
       coOpword.withdrawCrossword(body.get("token") ?? "");
       await save();
@@ -1010,7 +1024,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     try {
       const author = body.get("author");
       const started = author === null ? coOpword.startSession({ token }, body.get("title") ?? "") : coOpword.startPublishedSession({ token }, body.get("title") ?? "", author);
@@ -1156,7 +1170,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     const invite = body.get("invite") ?? "";
     const index = Number(body.get("index"));
     const sessionPath = `/session?invite=${encodeURIComponent(invite)}`;
@@ -1202,7 +1216,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     const invite = body.get("invite") ?? "";
     try {
       if (url.pathname === "/session/invite") {
@@ -1270,13 +1284,6 @@ const server = createServer(async (request, response) => {
   }
 
   send(response, 404, message("Not found."));
-  } catch (error) {
-    if (error instanceof BodyTooLargeError) {
-      rejectTooLarge(request, response);
-      return;
-    }
-    throw error;
-  }
 });
 
 server.listen(port, () => {

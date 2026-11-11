@@ -168,7 +168,7 @@ function sendBytes(port: number, path: string, body: string): Promise<Reply> {
   });
 }
 
-function sendChunked(port: number, path: string, chunks: string[]): Promise<Reply> {
+function sendChunked(port: number, path: string, chunks: string[], cookie: string | null = null): Promise<Reply> {
   return new Promise((resolve, reject) => {
     let gotResponse = false;
     const request = http.request(
@@ -177,7 +177,11 @@ function sendChunked(port: number, path: string, chunks: string[]): Promise<Repl
         port,
         path,
         method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", "transfer-encoding": "chunked" },
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "transfer-encoding": "chunked",
+          ...(cookie ? { cookie } : {}),
+        },
       },
       (response) => {
         gotResponse = true;
@@ -1364,6 +1368,25 @@ test("a request body over 256 KiB is rejected with 413 and does not issue a magi
     const fresh = await send(port, "POST", "/sign-in", null, { email: `fresh-${Date.now()}@example.com` });
     assert.equal(fresh.status, 200);
     assert.match(fresh.body, /Open magic link/);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
+test("a chunked body over 256 KiB is rejected with 413 before a body-free route runs", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const cookie = await signIn(port, "chunk-sign-out");
+    const oversize = await sendChunked(port, "/sign-out", ["x".repeat(maxBodyBytes + 1)], cookie);
+    assert.equal(oversize.status, 413);
+    assert.equal(oversize.setCookie, null);
+    assertAppSecurityHeaders(oversize);
+    assert.match(oversize.body, /That request is too large/);
+    const stillIn = await send(port, "GET", "/", cookie);
+    assert.equal(stillIn.status, 200);
+    assert.doesNotMatch(stillIn.body, /action="\/sign-in"/);
   } finally {
     child.kill();
     await once(child, "exit");
