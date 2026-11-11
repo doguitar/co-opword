@@ -80,10 +80,29 @@ function readCookie(request: IncomingMessage, name: string): string | undefined 
   return undefined;
 }
 
+const maxBodyBytes = 262144;
+
+class BodyTooLargeError extends Error {}
+
 async function readBody(request: IncomingMessage): Promise<URLSearchParams> {
   const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > maxBodyBytes) throw new BodyTooLargeError();
+    chunks.push(chunk as Buffer);
+  }
   return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+}
+
+function rejectTooLarge(request: IncomingMessage, response: ServerResponse): void {
+  const close = () => request.destroy();
+  if (response.headersSent) {
+    close();
+    return;
+  }
+  response.writeHead(413, { "content-type": "text/html; charset=utf-8", connection: "close" });
+  response.end(page(message("That request is too large.")), close);
 }
 
 function send(response: ServerResponse, status: number, main: string, headers: Record<string, string> = {}): void {
@@ -609,6 +628,13 @@ function dropStream(stream: SessionStream): void {
 }
 
 const server = createServer(async (request, response) => {
+  const contentLength = Number(request.headers["content-length"]);
+  if (Number.isFinite(contentLength) && contentLength > maxBodyBytes) {
+    rejectTooLarge(request, response);
+    return;
+  }
+
+  try {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   coOpword.noteTime(Date.now());
 
@@ -1223,6 +1249,13 @@ const server = createServer(async (request, response) => {
   }
 
   send(response, 404, message("Not found."));
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      rejectTooLarge(request, response);
+      return;
+    }
+    throw error;
+  }
 });
 
 server.listen(port, () => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
+import http from "node:http";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -46,6 +47,20 @@ async function startServer(port: number): Promise<ChildProcess> {
 
 type Reply = { status: number; body: string; location: string | null; cookie: string | null; setCookie: string | null; type: string };
 
+const maxBodyBytes = 262144;
+
+function replyFrom(response: Response, body: string): Reply {
+  const setCookie = response.headers.getSetCookie().find((entry) => entry.startsWith("player="));
+  return {
+    status: response.status,
+    body,
+    location: response.headers.get("location"),
+    cookie: setCookie ? setCookie.split(";")[0] : null,
+    setCookie: setCookie ?? null,
+    type: response.headers.get("content-type") ?? "",
+  };
+}
+
 async function send(
   port: number,
   method: string,
@@ -62,15 +77,86 @@ async function send(
     body: body ? (body instanceof URLSearchParams ? body : new URLSearchParams(body)) : undefined,
     redirect: "manual",
   });
-  const setCookie = response.headers.getSetCookie().find((entry) => entry.startsWith("player="));
-  return {
-    status: response.status,
-    body: await response.text(),
-    location: response.headers.get("location"),
-    cookie: setCookie ? setCookie.split(";")[0] : null,
-    setCookie: setCookie ?? null,
-    type: response.headers.get("content-type") ?? "",
-  };
+  return replyFrom(response, await response.text());
+}
+
+function readHttpReply(response: http.IncomingMessage, resolve: (reply: Reply) => void): void {
+  const parts: Buffer[] = [];
+  response.on("data", (chunk: Buffer) => parts.push(chunk));
+  response.on("end", () => {
+    const setCookieHeader = response.headers["set-cookie"];
+    const setCookie = (Array.isArray(setCookieHeader) ? setCookieHeader : setCookieHeader ? [setCookieHeader] : []).find((entry) =>
+      entry.startsWith("player="),
+    );
+    resolve({
+      status: response.statusCode ?? 0,
+      body: Buffer.concat(parts).toString("utf8"),
+      location: typeof response.headers.location === "string" ? response.headers.location : null,
+      cookie: setCookie ? setCookie.split(";")[0] : null,
+      setCookie: setCookie ?? null,
+      type: typeof response.headers["content-type"] === "string" ? response.headers["content-type"] : "",
+    });
+  });
+}
+
+function sendBytes(port: number, path: string, body: string): Promise<Reply> {
+  return new Promise((resolve, reject) => {
+    let gotResponse = false;
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": Buffer.byteLength(body),
+        },
+      },
+      (response) => {
+        gotResponse = true;
+        readHttpReply(response, resolve);
+      },
+    );
+    request.on("error", (error) => {
+      // Server may reset after a 413 while the client is still writing the body.
+      if (gotResponse && (error as NodeJS.ErrnoException).code === "ECONNRESET") return;
+      reject(error);
+    });
+    request.write(body);
+    request.end();
+  });
+}
+
+function sendChunked(port: number, path: string, chunks: string[]): Promise<Reply> {
+  return new Promise((resolve, reject) => {
+    let gotResponse = false;
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", "transfer-encoding": "chunked" },
+      },
+      (response) => {
+        gotResponse = true;
+        readHttpReply(response, resolve);
+      },
+    );
+    request.on("error", (error) => {
+      if (gotResponse && (error as NodeJS.ErrnoException).code === "ECONNRESET") return;
+      reject(error);
+    });
+    for (const chunk of chunks) request.write(chunk);
+    request.end();
+  });
+}
+
+function formBody(email: string, size: number): string {
+  const prefix = `email=${encodeURIComponent(email)}&pad=`;
+  assert.ok(size >= prefix.length);
+  return prefix + "x".repeat(size - prefix.length);
 }
 
 type Watch = {
@@ -1172,5 +1258,41 @@ test("changing Build size keeps the overlapping squares and the clues at those c
       child.kill();
       await once(child, "exit");
     }
+  }
+});
+
+test("a request body over 256 KiB is rejected with 413 and does not issue a magic link", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const oversizeEmail = `oversize-${Date.now()}@example.com`;
+    const oversize = await sendBytes(port, "/sign-in", formBody(oversizeEmail, maxBodyBytes + 1));
+    assert.equal(oversize.status, 413);
+    assert.equal(oversize.cookie, null);
+    assert.doesNotMatch(oversize.body, /\/magic\?token=/);
+    assert.doesNotMatch(oversize.body, /Open magic link/);
+
+    const boundaryEmail = `boundary-${Date.now()}@example.com`;
+    const boundary = formBody(boundaryEmail, maxBodyBytes);
+    assert.equal(Buffer.byteLength(boundary), maxBodyBytes);
+    const atLimit = await sendBytes(port, "/sign-in", boundary);
+    assert.notEqual(atLimit.status, 413);
+    assert.match(atLimit.body, /Open magic link/);
+    assert.match(atLimit.body, /\/magic\?token=/);
+
+    const chunked = await sendChunked(port, "/sign-in", [
+      formBody(`chunked-${Date.now()}@example.com`, maxBodyBytes - 1000),
+      "x".repeat(2000),
+    ]);
+    assert.equal(chunked.status, 413);
+    assert.equal(chunked.cookie, null);
+    assert.doesNotMatch(chunked.body, /\/magic\?token=/);
+
+    const fresh = await send(port, "POST", "/sign-in", null, { email: `fresh-${Date.now()}@example.com` });
+    assert.equal(fresh.status, 200);
+    assert.match(fresh.body, /Open magic link/);
+  } finally {
+    child.kill();
+    await once(child, "exit");
   }
 });

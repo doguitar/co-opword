@@ -82,4 +82,5 @@ Restore by stopping the service, replacing the database with a known-good copy o
 
 - Run `npm test` and `npm run typecheck` before deployment; CI runs both on pushes and pull requests.
 - Use `journalctl -u co-opword` for the Node process log.
+- The Node process rejects request bodies larger than 256 KiB (262144 bytes) with HTTP 413. A declared `Content-Length` over the cap is refused before routing; an oversize body discovered while reading is refused before form parsing or product calls.
 - The application has no health endpoint, automated backup job, or graceful-shutdown handler yet. Monitor the service process and verify backups manually; add these before relying on unattended recovery.
