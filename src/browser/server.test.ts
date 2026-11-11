@@ -59,6 +59,7 @@ type Reply = {
   cookie: string | null;
   setCookie: string | null;
   type: string;
+  retryAfter: string | null;
 } & SecurityHeaders;
 
 function securityHeadersOf(response: Response): SecurityHeaders {
@@ -93,6 +94,7 @@ function replyFrom(response: Response, body: string): Reply {
     cookie: setCookie ? setCookie.split(";")[0] : null,
     setCookie: setCookie ?? null,
     type: response.headers.get("content-type") ?? "",
+    retryAfter: response.headers.get("retry-after"),
     ...securityHeadersOf(response),
   };
 }
@@ -131,6 +133,7 @@ function readHttpReply(response: http.IncomingMessage, resolve: (reply: Reply) =
       cookie: setCookie ? setCookie.split(";")[0] : null,
       setCookie: setCookie ?? null,
       type: typeof response.headers["content-type"] === "string" ? response.headers["content-type"] : "",
+      retryAfter: typeof response.headers["retry-after"] === "string" ? response.headers["retry-after"] : null,
       csp: typeof response.headers["content-security-policy"] === "string" ? response.headers["content-security-policy"] : null,
       frameOptions: typeof response.headers["x-frame-options"] === "string" ? response.headers["x-frame-options"] : null,
       nosniff: typeof response.headers["x-content-type-options"] === "string" ? response.headers["x-content-type-options"] : null,
@@ -1390,5 +1393,79 @@ test("a chunked body over 256 KiB is rejected with 413 before a body-free route 
   } finally {
     child.kill();
     await once(child, "exit");
+  }
+});
+
+test("a repeated sign-in for the same address within 60 seconds returns 429 with Retry-After and identical feedback for known and unknown addresses", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const knownEmail = `known-${Date.now()}@example.com`;
+    const unknownEmail = `unknown-${Date.now()}@example.com`;
+    const firstKnown = await send(port, "POST", "/sign-in", null, { email: knownEmail });
+    assert.equal(firstKnown.status, 200);
+    assert.match(firstKnown.body, /Open magic link/);
+    const magic = firstKnown.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
+    const signed = await send(port, "GET", magic, null);
+    assert.equal(signed.status, 303);
+
+    const limitedKnown = await send(port, "POST", "/sign-in", null, { email: knownEmail });
+    assert.equal(limitedKnown.status, 429);
+    assert.match(limitedKnown.body, /Too many sign-in emails\. Try again in (\d+) seconds\./);
+    const knownSeconds = limitedKnown.body.match(/Try again in (\d+) seconds/)?.[1] ?? "";
+    assert.equal(limitedKnown.retryAfter, knownSeconds);
+    assert.ok(Number(knownSeconds) >= 1 && Number(knownSeconds) <= 60);
+    assert.doesNotMatch(limitedKnown.body, /\/magic\?token=/);
+    assert.equal(limitedKnown.cookie, null);
+
+    const firstUnknown = await send(port, "POST", "/sign-in", null, { email: unknownEmail });
+    assert.equal(firstUnknown.status, 200);
+    const limitedUnknown = await send(port, "POST", "/sign-in", null, { email: unknownEmail });
+    assert.equal(limitedUnknown.status, 429);
+    assert.match(limitedUnknown.body, /Too many sign-in emails\. Try again in (\d+) seconds\./);
+    assert.equal(limitedUnknown.retryAfter, limitedUnknown.body.match(/Try again in (\d+) seconds/)?.[1] ?? null);
+    assert.equal(limitedKnown.body.includes(knownEmail), false);
+    assert.equal(limitedUnknown.body.includes(unknownEmail), false);
+    assert.equal(
+      limitedKnown.body.replace(/Try again in \d+ seconds/, "Try again in N seconds"),
+      limitedUnknown.body.replace(/Try again in \d+ seconds/, "Try again in N seconds"),
+    );
+    assert.doesNotMatch(limitedUnknown.body, /\/magic\?token=/);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
+test("the fifty-first distinct sign-in address within an hour returns 429 and leaves in-limit sign-in unchanged on a fresh server", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const stamp = Date.now();
+    for (let index = 0; index < 50; index += 1) {
+      const issued = await send(port, "POST", "/sign-in", null, { email: `global-${stamp}-${index}@example.com` });
+      assert.equal(issued.status, 200, `issuance ${index}`);
+      assert.match(issued.body, /Open magic link/);
+    }
+    const limited = await send(port, "POST", "/sign-in", null, { email: `global-${stamp}-overflow@example.com` });
+    assert.equal(limited.status, 429);
+    assert.match(limited.body, /Too many sign-in emails\. Try again in (\d+) seconds\./);
+    assert.equal(limited.retryAfter, limited.body.match(/Try again in (\d+) seconds/)?.[1] ?? null);
+    assert.doesNotMatch(limited.body, /\/magic\?token=/);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+
+  const freshPort = await freePort();
+  const fresh = await startServer(freshPort);
+  try {
+    const ok = await send(freshPort, "POST", "/sign-in", null, { email: `fresh-${Date.now()}@example.com` });
+    assert.equal(ok.status, 200);
+    assert.match(ok.body, /Open magic link/);
+    assert.equal(ok.retryAfter, null);
+  } finally {
+    fresh.kill();
+    await once(fresh, "exit");
   }
 });

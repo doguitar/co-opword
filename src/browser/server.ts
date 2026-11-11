@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deliverLink } from "../mail/magicLink.ts";
-import { CrosswordRejected, DisplayNameTaken, openCoOpword, type PlayerSession } from "../product/coopword.ts";
+import { CrosswordRejected, DisplayNameTaken, MagicLinkRateLimited, openCoOpword, type PlayerSession } from "../product/coopword.ts";
 import { openSnapshotStore } from "../storage/snapshotStore.ts";
 import { librarySeed } from "./librarySeed.ts";
 
@@ -710,7 +710,16 @@ const server = createServer(async (request, response) => {
   if (request.method === "POST" && url.pathname === "/sign-in") {
     const body = readBody(rawBody);
     const email = body.get("email") ?? "";
-    const issued = coOpword.requestMagicLink(email);
+    let issued: { token: string; email: string };
+    try {
+      issued = coOpword.requestMagicLink(email);
+    } catch (error) {
+      if (error instanceof MagicLinkRateLimited) {
+        send(response, 429, message(error.message), { "retry-after": String(error.retryAfterSeconds) });
+        return;
+      }
+      throw error;
+    }
     await save();
     const href = `/magic?token=${encodeURIComponent(issued.token)}`;
     try {

@@ -21,6 +21,16 @@ export class CrosswordRejected extends Error {
   }
 }
 
+export class MagicLinkRateLimited extends Error {
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    super(`Too many sign-in emails. Try again in ${retryAfterSeconds} seconds.`);
+    this.name = "MagicLinkRateLimited";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 export type Direction = "across" | "down";
 
 export type LibraryCrosswordInput = {
@@ -83,12 +93,19 @@ export type Completion = {
 };
 
 const WEEK = 7 * 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+const PER_ADDRESS_GAP = 60 * 1000;
+const PER_ADDRESS_HOUR = 5;
+const GLOBAL_HOUR = 50;
 
 type OpenView = { playerId: string; invite: string };
 
+type MagicLinkRecord = { token: string; email: string; invite?: string; expiresAt?: number };
+
 type State = {
   players: Player[];
-  magicLinks: { token: string; email: string; invite?: string }[];
+  magicLinks: MagicLinkRecord[];
   sessions: { token: string; playerId: string }[];
   library: OpenedLibraryCrossword[];
   published: PublishedCrossword[];
@@ -168,6 +185,32 @@ export function openCoOpword(snapshot?: string): CoOpword {
   };
 
   let now = 0;
+  const issuances: { email: string; at: number }[] = [];
+
+  function pruneIssuances(): void {
+    while (issuances.length > 0 && now - issuances[0]!.at >= HOUR) issuances.shift();
+  }
+
+  function rateLimitRetrySeconds(email: string): number {
+    pruneIssuances();
+    let wait = 0;
+    const forEmail = issuances.filter((entry) => entry.email === email);
+    const latest = forEmail[forEmail.length - 1];
+    if (latest !== undefined && now - latest.at < PER_ADDRESS_GAP) {
+      wait = Math.max(wait, latest.at + PER_ADDRESS_GAP - now);
+    }
+    if (forEmail.length >= PER_ADDRESS_HOUR) {
+      wait = Math.max(wait, forEmail[forEmail.length - PER_ADDRESS_HOUR]!.at + HOUR - now);
+    }
+    if (issuances.length >= GLOBAL_HOUR) {
+      wait = Math.max(wait, issuances[issuances.length - GLOBAL_HOUR]!.at + HOUR - now);
+    }
+    return wait <= 0 ? 0 : Math.ceil(wait / 1000);
+  }
+
+  function purgeMagicLinks(): void {
+    state.magicLinks = state.magicLinks.filter((link) => link.expiresAt !== undefined && now < link.expiresAt);
+  }
 
   function playerFor(session: PlayerSession): Player {
     const found = state.sessions.find((entry) => entry.token === session.token);
@@ -184,8 +227,12 @@ export function openCoOpword(snapshot?: string): CoOpword {
   return {
     requestMagicLink(email: string): MagicLink {
       const normalized = normalizeEmail(email);
+      const retryAfterSeconds = rateLimitRetrySeconds(normalized);
+      if (retryAfterSeconds > 0) throw new MagicLinkRateLimited(retryAfterSeconds);
+      purgeMagicLinks();
       const token = crypto.randomUUID();
-      state.magicLinks.push({ token, email: normalized });
+      state.magicLinks.push({ token, email: normalized, expiresAt: now + DAY });
+      issuances.push({ email: normalized, at: now });
       return { token, email: normalized };
     },
     openMagicLink(token: string): PlayerSession & { invite: string | null } {
@@ -193,7 +240,12 @@ export function openCoOpword(snapshot?: string): CoOpword {
       if (linkIndex === -1) {
         throw new Error("That magic link is no longer valid");
       }
-      const [link] = state.magicLinks.splice(linkIndex, 1);
+      const link = state.magicLinks[linkIndex]!;
+      if (link.expiresAt === undefined || now >= link.expiresAt) {
+        state.magicLinks.splice(linkIndex, 1);
+        throw new Error("That magic link is no longer valid");
+      }
+      state.magicLinks.splice(linkIndex, 1);
       let player = state.players.find((entry) => entry.email === link.email);
       if (!player) {
         player = { id: crypto.randomUUID(), email: link.email, displayName: null };
@@ -436,8 +488,9 @@ export function openCoOpword(snapshot?: string): CoOpword {
         if (!live.memberIds.includes(existing.id)) addMember(live, existing.id);
         return { email: normalized, token: null };
       }
+      purgeMagicLinks();
       const token = crypto.randomUUID();
-      state.magicLinks.push({ token, email: normalized, invite });
+      state.magicLinks.push({ token, email: normalized, invite, expiresAt: now + DAY });
       return { email: normalized, token };
     },
     openSessions(session: PlayerSession): { invite: string; title: string }[] {

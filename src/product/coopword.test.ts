@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CrosswordRejected, DisplayNameTaken, openCoOpword, type CoOpword } from "./coopword.ts";
+import { CrosswordRejected, DisplayNameTaken, MagicLinkRateLimited, openCoOpword, type CoOpword } from "./coopword.ts";
 
 test("a magic link to a new email creates a Player and signs them in, and a later link to that email signs the same Player in", () => {
   const coOpword = openCoOpword();
+  coOpword.noteTime(0);
 
   const firstLink = coOpword.requestMagicLink("Ada@Example.com");
   assert.equal(firstLink.email, "ada@example.com");
@@ -13,6 +14,7 @@ test("a magic link to a new email creates a Player and signs them in, and a late
 
   coOpword.chooseDisplayName(firstSession, "Ada");
 
+  coOpword.noteTime(60_000);
   const returnLink = coOpword.requestMagicLink("ada@example.com");
   const returnSession = coOpword.openMagicLink(returnLink.token);
 
@@ -641,6 +643,7 @@ test("a plain sign-in magic link identifies no Invite, and an ended Session stil
   assert.equal(plain.invite, null);
   assert.throws(() => coOpword.openSession(plain, invite));
 
+  coOpword.noteTime(WEEK - 1);
   const issued = coOpword.inviteEmail(ada, invite, "late@example.com");
   coOpword.noteTime(WEEK);
   const late = coOpword.openMagicLink(issued.token ?? "");
@@ -687,4 +690,156 @@ test("withdrawing a published Crossword leaves the Session and the Completion al
   coOpword.withdrawCrossword(again.withdrawToken);
   assert.equal(coOpword.completions(ada).every((completion) => completion.title === "Tiny" && completion.author === "Ada"), true);
   assert.equal(coOpword.published(ada).length, 0);
+});
+
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+test("a second sign-in link for the same address within 60 seconds is refused with exact retry timing and does not store a token", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const first = coOpword.requestMagicLink("Ada@Example.com");
+  const before = coOpword.snapshot();
+
+  assert.throws(
+    () => coOpword.requestMagicLink("ada@example.com"),
+    (error: unknown) => {
+      assert.ok(error instanceof MagicLinkRateLimited);
+      assert.equal(error.retryAfterSeconds, 60);
+      assert.equal(error.message, "Too many sign-in emails. Try again in 60 seconds.");
+      return true;
+    },
+  );
+  assert.equal(coOpword.snapshot(), before);
+
+  coOpword.noteTime(30_000);
+  assert.throws(
+    () => coOpword.requestMagicLink("ada@example.com"),
+    (error: unknown) => error instanceof MagicLinkRateLimited && error.retryAfterSeconds === 30,
+  );
+
+  coOpword.noteTime(60_000);
+  const next = coOpword.requestMagicLink("ada@example.com");
+  assert.notEqual(next.token, first.token);
+  assert.deepEqual(coOpword.whoAmI(coOpword.openMagicLink(next.token)), { displayName: null });
+});
+
+test("a sixth sign-in link for the same address within an hour is refused until the oldest hour slot frees", () => {
+  const coOpword = openCoOpword();
+  for (let index = 0; index < 5; index += 1) {
+    coOpword.noteTime(index * 60_000);
+    coOpword.requestMagicLink("ada@example.com");
+  }
+  coOpword.noteTime(5 * 60_000);
+  const before = coOpword.snapshot();
+  assert.throws(
+    () => coOpword.requestMagicLink("ada@example.com"),
+    (error: unknown) => error instanceof MagicLinkRateLimited && error.retryAfterSeconds === (HOUR - 5 * 60_000) / 1000,
+  );
+  assert.equal(coOpword.snapshot(), before);
+
+  coOpword.noteTime(HOUR);
+  assert.equal(coOpword.requestMagicLink("ada@example.com").email, "ada@example.com");
+});
+
+test("a fifty-first sign-in link across addresses within an hour is refused with global retry timing", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  for (let index = 0; index < 50; index += 1) {
+    coOpword.requestMagicLink(`user${index}@example.com`);
+  }
+  const before = coOpword.snapshot();
+  assert.throws(
+    () => coOpword.requestMagicLink("overflow@example.com"),
+    (error: unknown) => error instanceof MagicLinkRateLimited && error.retryAfterSeconds === HOUR / 1000,
+  );
+  assert.equal(coOpword.snapshot(), before);
+
+  coOpword.noteTime(HOUR);
+  assert.equal(coOpword.requestMagicLink("overflow@example.com").email, "overflow@example.com");
+});
+
+test("sign-in rate limits match for known and unknown addresses and reset in a fresh product instance", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const knownSession = coOpword.openMagicLink(coOpword.requestMagicLink("known@example.com").token);
+  coOpword.chooseDisplayName(knownSession, "Known");
+  coOpword.requestMagicLink("unknown@example.com");
+
+  let knownError: MagicLinkRateLimited | undefined;
+  let unknownError: MagicLinkRateLimited | undefined;
+  try {
+    coOpword.requestMagicLink("known@example.com");
+  } catch (error) {
+    assert.ok(error instanceof MagicLinkRateLimited);
+    knownError = error;
+  }
+  try {
+    coOpword.requestMagicLink("unknown@example.com");
+  } catch (error) {
+    assert.ok(error instanceof MagicLinkRateLimited);
+    unknownError = error;
+  }
+  assert.equal(knownError?.message, unknownError?.message);
+  assert.equal(knownError?.retryAfterSeconds, unknownError?.retryAfterSeconds);
+
+  const restored = openCoOpword(coOpword.snapshot());
+  restored.noteTime(0);
+  assert.equal(restored.requestMagicLink("known@example.com").email, "known@example.com");
+  assert.equal(restored.requestMagicLink("fresh@example.com").email, "fresh@example.com");
+});
+
+test("authenticated invite emails are not rate-limited and still expire after 24 hours", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const ada = signedIn(coOpword, "ada@example.com", "Ada");
+  coOpword.admitLibraryCrossword(tinyCrossword);
+  const invite = coOpword.startSession(ada, "Tiny").invite;
+
+  for (let index = 0; index < 49; index += 1) {
+    coOpword.requestMagicLink(`burst${index}@example.com`);
+  }
+  assert.throws(() => coOpword.requestMagicLink("blocked@example.com"), MagicLinkRateLimited);
+
+  const invited = coOpword.inviteEmail(ada, invite, "guest@example.com");
+  assert.ok(invited.token);
+  assert.equal(coOpword.openMagicLink(invited.token ?? "").invite, invite);
+
+  coOpword.noteTime(60_000);
+  const laterInvite = coOpword.inviteEmail(ada, invite, "later@example.com");
+  coOpword.noteTime(60_000 + DAY);
+  assert.throws(() => coOpword.openMagicLink(laterInvite.token ?? ""));
+});
+
+test("a magic link older than 24 hours cannot sign anyone in, including legacy links without expiry", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const link = coOpword.requestMagicLink("ada@example.com");
+  coOpword.noteTime(DAY - 1);
+  assert.deepEqual(coOpword.whoAmI(coOpword.openMagicLink(link.token)), { displayName: null });
+
+  coOpword.noteTime(DAY);
+  const expired = coOpword.requestMagicLink("sam@example.com");
+  coOpword.noteTime(DAY + DAY);
+  assert.throws(() => coOpword.openMagicLink(expired.token));
+
+  const legacy = openCoOpword(JSON.stringify({ magicLinks: [{ token: "legacy-token", email: "old@example.com" }] }));
+  legacy.noteTime(0);
+  assert.throws(() => legacy.openMagicLink("legacy-token"));
+});
+
+test("issuing a later magic link removes expired and already-consumed links", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const consumed = coOpword.requestMagicLink("ada@example.com");
+  coOpword.openMagicLink(consumed.token);
+  const stale = coOpword.requestMagicLink("stale@example.com");
+  coOpword.noteTime(DAY);
+  coOpword.requestMagicLink("fresh@example.com");
+  assert.throws(() => coOpword.openMagicLink(consumed.token));
+  assert.throws(() => coOpword.openMagicLink(stale.token));
+  assert.deepEqual(
+    JSON.parse(coOpword.snapshot()).magicLinks.map((link: { email: string }) => link.email),
+    ["fresh@example.com"],
+  );
 });

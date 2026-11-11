@@ -37,7 +37,7 @@ The shared crossword being filled.
 _Avoid_: Board, sheet
 
 **Player**:
-A person with an account who can join a Session. The account is their email. Other Players see only a display name, which is unique.
+A person with an account who can join a Session. The account is their email. Other Players see only a display name, which is unique. Sign-in is a one-time email link that expires 24 hours after issuance. Unauthenticated sign-in emails are limited in-process per normalized address (at most one per 60 seconds and five per rolling hour) and to 50 per rolling hour across all addresses; a process restart clears those counters. Hitting a limit returns the same retry timing whether or not that address already has an account. Authenticated Session invite emails are not under those issuance limits; their one-time links still expire after 24 hours.
 _Avoid_: User
 
 **Invite**:
