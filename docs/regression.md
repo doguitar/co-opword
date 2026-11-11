@@ -13,6 +13,22 @@ npm run typecheck
 
 `npm test` runs the product, browser, and snapshot-store tests named in `package.json`. Both commands must finish with no failures. A product test is not a substitute for the browser pass below.
 
+## Email delivery
+
+Without SMTP credentials outside production, sign-in, session-invite, and Revise links are written to `data/magic-link-outbox.jsonl` and `data/withdraw-outbox.jsonl` for local development. In production, missing SMTP credentials fail delivery instead of writing usable links to disk.
+
+| Variable | Value |
+| --- | --- |
+| `SMTP_HOST` | `smtp.purelymail.com` (default) |
+| `SMTP_PORT` | `465` (default; SSL/TLS) |
+| `SMTP_SECURE` | `true` for port 465; set `false` for port 587 with STARTTLS |
+| `SMTP_USER` | Your Purelymail login email |
+| `SMTP_PASSWORD` | Your Purelymail password or app password |
+| `MAIL_FROM` | `donotreply@updo.gg` (default) |
+| `PUBLIC_URL` | Public base URL of this deployment, e.g. `https://updo.gg` |
+
+The server also loads `data/.env` on startup when the file exists; inherited environment variables take precedence. For local deployments, put these settings in that ignored file. Keep it private and do not commit it.
+
 ## Browser screenshots
 
 The PNGs in `regression/` are the baseline captured through the omp browser relay.
@@ -21,10 +37,10 @@ Any change to a UI element requires a new screenshot of every page that shows th
 
 ### Capture
 
-Start a server that does not write the product snapshot into `data/`. The magic-link outbox is still appended under `data/`; do not commit that file.
+Start a server that does not write the product snapshot into `data/`. Without SMTP credentials, sign-in and session-invite links go to `data/magic-link-outbox.jsonl`, and Withdraw links go to `data/withdraw-outbox.jsonl`; do not commit those files.
 
 ```
-cmd /c "set PORT=3477&& set DATABASE_URL=sqlite::memory:&& npm start"
+cmd /c "set PORT=3477&& set DATABASE_URL=sqlite::memory:&& set SMTP_USER=&& set SMTP_PASSWORD=&& npm start"
 ```
 
 From the agent eval kernel, open the omp relay against that server. The screenshot is of that live page. A headless browser does not count. This uses the user's Chrome through the relay and leaves their other tabs alone:
