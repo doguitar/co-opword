@@ -16,6 +16,7 @@ npm run typecheck
 
 Create a dedicated service account and data directory, then set `/etc/co-opword/environment` to mode `0600` and owned by root:
 
+```ini
 NODE_ENV=production
 PORT=3000
 DATABASE_URL=sqlite:/var/lib/co-opword/coopword.sqlite
