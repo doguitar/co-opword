@@ -45,7 +45,42 @@ async function startServer(port: number): Promise<ChildProcess> {
   return child;
 }
 
-type Reply = { status: number; body: string; location: string | null; cookie: string | null; setCookie: string | null; type: string };
+type SecurityHeaders = {
+  csp: string | null;
+  frameOptions: string | null;
+  nosniff: string | null;
+  referrerPolicy: string | null;
+};
+
+type Reply = {
+  status: number;
+  body: string;
+  location: string | null;
+  cookie: string | null;
+  setCookie: string | null;
+  type: string;
+} & SecurityHeaders;
+
+function securityHeadersOf(response: Response): SecurityHeaders {
+  return {
+    csp: response.headers.get("content-security-policy"),
+    frameOptions: response.headers.get("x-frame-options"),
+    nosniff: response.headers.get("x-content-type-options"),
+    referrerPolicy: response.headers.get("referrer-policy"),
+  };
+}
+
+function assertAppSecurityHeaders(headers: SecurityHeaders): void {
+  assert.equal(
+    headers.csp,
+    "script-src 'self'; style-src 'self'; form-action 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'",
+  );
+  assert.equal(headers.frameOptions, "DENY");
+  assert.equal(headers.nosniff, "nosniff");
+  assert.equal(headers.referrerPolicy, "same-origin");
+  assert.equal(headers.csp?.includes("unsafe-inline"), false);
+  assert.equal(headers.csp?.includes("unsafe-eval"), false);
+}
 
 const maxBodyBytes = 262144;
 
@@ -58,6 +93,7 @@ function replyFrom(response: Response, body: string): Reply {
     cookie: setCookie ? setCookie.split(";")[0] : null,
     setCookie: setCookie ?? null,
     type: response.headers.get("content-type") ?? "",
+    ...securityHeadersOf(response),
   };
 }
 
@@ -95,6 +131,10 @@ function readHttpReply(response: http.IncomingMessage, resolve: (reply: Reply) =
       cookie: setCookie ? setCookie.split(";")[0] : null,
       setCookie: setCookie ?? null,
       type: typeof response.headers["content-type"] === "string" ? response.headers["content-type"] : "",
+      csp: typeof response.headers["content-security-policy"] === "string" ? response.headers["content-security-policy"] : null,
+      frameOptions: typeof response.headers["x-frame-options"] === "string" ? response.headers["x-frame-options"] : null,
+      nosniff: typeof response.headers["x-content-type-options"] === "string" ? response.headers["x-content-type-options"] : null,
+      referrerPolicy: typeof response.headers["referrer-policy"] === "string" ? response.headers["referrer-policy"] : null,
     });
   });
 }
@@ -167,7 +207,7 @@ type Watch = {
   untilOpen: () => Promise<void>;
   untilCount: (count: number) => Promise<void>;
   stop: () => void;
-};
+} & SecurityHeaders;
 
 function watchSession(port: number, invite: string, cookie: string | null): Promise<Watch> {
   const controller = new AbortController();
@@ -209,6 +249,7 @@ function watchSession(port: number, invite: string, cookie: string | null): Prom
       untilOpen: () => waitUntil(() => text.includes(": open"), () => `stream ${response.status} ${JSON.stringify(text)}`),
       untilCount: (count: number) => waitUntil(() => events() >= count, () => `saw ${events()} session events in ${JSON.stringify(text)}`),
       stop: () => controller.abort(),
+      ...securityHeadersOf(response),
     };
   });
 }
@@ -262,6 +303,38 @@ function rejection(body: string, invite: string): void {
     [href],
   );
 }
+
+test("HTML and Session stream replies send the app security headers", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  let stream: Watch | undefined;
+  try {
+    const page = await send(port, "GET", "/", null);
+    assert.equal(page.status, 200);
+    assert.match(page.type, /text\/html/);
+    assertAppSecurityHeaders(page);
+
+    const cookie = await signIn(port, "headers");
+    const started = await send(port, "POST", "/session", cookie, { title: "First Row" });
+    const invite = new URL(started.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
+    assert.equal(started.status, 303);
+    assertAppSecurityHeaders(started);
+
+    stream = await watchSession(port, invite, cookie);
+    assert.equal(stream.status, 200);
+    assert.match(stream.type, /text\/event-stream/);
+    assertAppSecurityHeaders(stream);
+    await stream.untilOpen();
+
+    const stylesheet = await send(port, "GET", "/co-opword.css", null);
+    assert.equal(stylesheet.status, 200);
+    assert.equal(stylesheet.nosniff, "nosniff");
+  } finally {
+    stream?.stop();
+    child.kill();
+    await once(child, "exit");
+  }
+});
 
 test("a signed-in Player signs out from the menu", async () => {
   const port = await freePort();

@@ -64,7 +64,7 @@ coopword.example.com {
 }
 ```
 
-Caddy provisions HTTPS. The app sets `Secure` on the Player cookie in production; do not expose port 3000 directly or run production without HTTPS.
+Caddy provisions HTTPS. The app sets `Secure` on the Player cookie in production; do not expose port 3000 directly or run production without HTTPS. The Node process also sends Content-Security-Policy, framing denial, `X-Content-Type-Options`, and Referrer-Policy on HTML and Session event-stream replies; leave HSTS to the HTTPS proxy after TLS is verified.
 
 ## Database and recovery
 

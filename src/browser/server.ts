@@ -95,18 +95,26 @@ async function readBody(request: IncomingMessage): Promise<URLSearchParams> {
   return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
 }
 
+const securityHeaders = {
+  "content-security-policy":
+    "script-src 'self'; style-src 'self'; form-action 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'",
+  "x-frame-options": "DENY",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "same-origin",
+};
+
 function rejectTooLarge(request: IncomingMessage, response: ServerResponse): void {
   const close = () => request.destroy();
   if (response.headersSent) {
     close();
     return;
   }
-  response.writeHead(413, { "content-type": "text/html; charset=utf-8", connection: "close" });
+  response.writeHead(413, { "content-type": "text/html; charset=utf-8", connection: "close", ...securityHeaders });
   response.end(page(message("That request is too large.")), close);
 }
 
 function send(response: ServerResponse, status: number, main: string, headers: Record<string, string> = {}): void {
-  response.writeHead(status, { "content-type": "text/html; charset=utf-8", ...headers });
+  response.writeHead(status, { "content-type": "text/html; charset=utf-8", ...securityHeaders, ...headers });
   response.end(page(main));
 }
 
@@ -639,25 +647,37 @@ const server = createServer(async (request, response) => {
   coOpword.noteTime(Date.now());
 
   if (request.method === "GET" && url.pathname === "/co-opword.css") {
-    response.writeHead(200, { "content-type": "text/css; charset=utf-8" });
+    response.writeHead(200, { "content-type": "text/css; charset=utf-8", ...securityHeaders });
     response.end(stylesheet);
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/session.js") {
-    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    response.writeHead(200, {
+      "content-type": "text/javascript; charset=utf-8",
+      "cache-control": "no-store",
+      ...securityHeaders,
+    });
     response.end(readFileSync(join(pagesDir, "session.js")));
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/menu.js") {
-    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    response.writeHead(200, {
+      "content-type": "text/javascript; charset=utf-8",
+      "cache-control": "no-store",
+      ...securityHeaders,
+    });
     response.end(readFileSync(join(pagesDir, "menu.js")));
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/build.js") {
-    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    response.writeHead(200, {
+      "content-type": "text/javascript; charset=utf-8",
+      "cache-control": "no-store",
+      ...securityHeaders,
+    });
     response.end(readFileSync(join(pagesDir, "build.js")));
     return;
   }
@@ -1041,6 +1061,7 @@ const server = createServer(async (request, response) => {
       "content-type": "text/event-stream",
       "cache-control": "no-store",
       connection: "keep-alive",
+      ...securityHeaders,
     });
     response.write("retry: 500\n: open\n\n");
     response.on("close", () => dropStream(stream));
