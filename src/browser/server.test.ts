@@ -26,7 +26,7 @@ function freePort(): Promise<number> {
 async function startServer(port: number): Promise<ChildProcess> {
   const child = spawn(process.execPath, ["--experimental-strip-types", "src/browser/server.ts"], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), DATABASE_URL: "sqlite::memory:" },
+    env: { ...process.env, PORT: String(port), DATABASE_URL: "sqlite::memory:", SMTP_USER: "", SMTP_PASSWORD: "" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";

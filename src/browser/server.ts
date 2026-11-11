@@ -7,9 +7,14 @@ import { CrosswordRejected, DisplayNameTaken, openCoOpword, type PlayerSession }
 import { openSnapshotStore } from "../storage/snapshotStore.ts";
 import { librarySeed } from "./librarySeed.ts";
 
-const port = Number(process.env.PORT ?? 3000);
 const here = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(here, "../../data");
+try {
+  process.loadEnvFile(join(dataDir, ".env"));
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
+const port = Number(process.env.PORT ?? 3000);
 const pagesDir = join(here, "pages");
 const outboxPath = join(dataDir, "magic-link-outbox.jsonl");
 const withdrawOutboxPath = join(dataDir, "withdraw-outbox.jsonl");
@@ -537,12 +542,16 @@ function readBuild(body: URLSearchParams): {
 async function reviseNotice(email: string, token: string): Promise<string> {
   const href = `/revise?token=${encodeURIComponent(token)}`;
   const address = email.trim();
+  const privateDelivery = process.env.NODE_ENV === "production" || Boolean(process.env.SMTP_USER || process.env.SMTP_PASSWORD);
   if (address === "") return messageLink("A Revise link is ready.", href, "Revise");
   try {
-    await deliverLink(withdrawOutboxPath, address, token, href);
-    return messageLink(`A Revise link was sent to ${address}.`, href, "Revise");
+    const delivery = await deliverLink(withdrawOutboxPath, address, token, href, "Your Co-opword Revise link");
+    return delivery === "smtp"
+      ? message(`A Revise link was emailed to ${address}.`)
+      : messageLink(`A Revise link was sent to ${address}.`, href, "Revise");
   } catch {
-    return messageLink(`The Crossword was published, but the Revise link could not be emailed to ${address}.`, href, "Revise");
+    const text = `The Crossword was published, but the Revise link could not be emailed to ${address}.`;
+    return privateDelivery ? message(text) : messageLink(text, href, "Revise");
   }
 }
 
@@ -645,15 +654,14 @@ const server = createServer(async (request, response) => {
     await save();
     const href = `/magic?token=${encodeURIComponent(issued.token)}`;
     try {
-      await deliverLink(outboxPath, issued.email, issued.token, href);
+      const delivery = await deliverLink(outboxPath, issued.email, issued.token, href, "Sign in to Co-opword");
+      if (delivery === "smtp") {
+        send(response, 200, message("Check your email for a sign-in link."));
+      } else {
+        send(response, 200, messageLink(`A magic link was sent to ${issued.email}.`, href, "Open magic link"));
+      }
     } catch {
       send(response, 503, message("We could not send the sign-in email. Please try again."));
-      return;
-    }
-    if (process.env.NODE_ENV === "production") {
-      send(response, 200, message("Check your email for a sign-in link."));
-    } else {
-      send(response, 200, messageLink(`A magic link was sent to ${issued.email}.`, href, "Open magic link"));
     }
     return;
   }
@@ -881,13 +889,15 @@ const server = createServer(async (request, response) => {
       return;
     }
     const body = await readBody(request);
+    let issued;
     try {
       const crossword = JSON.parse(body.get("crossword") ?? "");
-      const issued = coOpword.publishCrossword({ token }, crossword, body.get("author") ?? "");
+      issued = coOpword.publishCrossword({ token }, crossword, body.get("author") ?? "");
       await save();
       send(response, 200, await reviseNotice(body.get("editEmail") ?? "", issued.withdrawToken));
     } catch {
       send(response, 400, message("That Crossword cannot be published."));
+      return;
     }
     return;
   }
@@ -1156,7 +1166,7 @@ const server = createServer(async (request, response) => {
         await save();
         publish(invite);
         try {
-          await deliverLink(outboxPath, issued.email, issued.token, href);
+          await deliverLink(outboxPath, issued.email, issued.token, href, "Your Co-opword session invitation");
         } catch {
           send(
             response,

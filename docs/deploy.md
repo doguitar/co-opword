@@ -20,12 +20,16 @@ Create a dedicated service account and data directory, then set `/etc/co-opword/
 NODE_ENV=production
 PORT=3000
 DATABASE_URL=sqlite:/var/lib/co-opword/coopword.sqlite
-PUBLIC_ORIGIN=https://coopword.example.com
-EMAIL_FROM=Co-opword <verified-sender@example.com>
-RESEND_API_KEY=replace-with-secret
+PUBLIC_URL=https://coopword.example.com
+SMTP_HOST=smtp.purelymail.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=donotreply@updo.gg
+SMTP_PASSWORD=replace-with-secret
+MAIL_FROM=donotreply@updo.gg
 ```
 
-Verify the sender domain with Resend before launch. `PUBLIC_ORIGIN` must be the public HTTPS origin with no path. Keep the API key out of the repository and process logs.
+The mail transport uses Purelymail SMTP. Keep the SMTP password out of the repository and process logs; use a Purelymail app password where available. `PUBLIC_URL` must be the public HTTPS origin with no path.
 
 Example `/etc/systemd/system/co-opword.service`:
 
