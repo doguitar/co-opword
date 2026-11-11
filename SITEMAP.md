@@ -6,11 +6,19 @@ A signed-out request to any page except Sign in, Revise, and Help is sent to Sig
 
 ## Sign in
 
-`GET /` with no Player cookie. The Player enters an email and posts to `/sign-in`. The magic link is not a page. It is `/magic?token=...` in `data/magic-link-outbox.jsonl`. That link opens Home, or the Session when the token carries an Invite.
+`GET /` with no Player cookie. The Player enters an email and posts to `/sign-in`. The emailed link is `/magic?token=...`; its GET opens Magic-link confirmation without consuming the token. Only the confirmation form's same-origin POST to `/magic` consumes it. The token may carry an Invite.
 
 Reached from: a direct visit, any other page when the Player is signed out, or the menu Sign out action. That action posts `/sign-out`, which redirects to `/` after the Player cookie is cleared.
 
-Goes to: Home or a Session, after the magic link.
+Goes to: Magic-link confirmation.
+
+## Magic-link confirmation
+
+`GET /magic?token=...` validates the one-time link and renders a confirmation form without consuming it or creating a Player session. Only a same-origin `POST /magic` from that form consumes the link. Invalid, expired, replayed, and cross-origin attempts return an error.
+
+Reached from: a magic link in a sign-in or Session-invite email.
+
+Goes to: Home or the invited Session after a valid confirmation POST.
 
 ## Home
 

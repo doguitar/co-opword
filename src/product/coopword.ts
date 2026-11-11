@@ -126,6 +126,7 @@ export type OpenedSession = {
 
 export type CoOpword = {
   requestMagicLink(email: string): MagicLink;
+  isMagicLinkValid(token: string): boolean;
   openMagicLink(token: string): PlayerSession & { invite: string | null };
   chooseDisplayName(session: PlayerSession, displayName: string): void;
   whoAmI(session: PlayerSession): SignedInPlayer;
@@ -209,7 +210,11 @@ export function openCoOpword(snapshot?: string): CoOpword {
   }
 
   function purgeMagicLinks(): void {
-    state.magicLinks = state.magicLinks.filter((link) => link.expiresAt !== undefined && now < link.expiresAt);
+    state.magicLinks = state.magicLinks.filter(magicLinkIsValid);
+  }
+
+  function magicLinkIsValid(link: (typeof state.magicLinks)[number] | undefined): boolean {
+    return link !== undefined && link.expiresAt !== undefined && now < link.expiresAt;
   }
 
   function playerFor(session: PlayerSession): Player {
@@ -235,13 +240,16 @@ export function openCoOpword(snapshot?: string): CoOpword {
       issuances.push({ email: normalized, at: now });
       return { token, email: normalized };
     },
+    isMagicLinkValid(token: string): boolean {
+      return magicLinkIsValid(state.magicLinks.find((link) => link.token === token));
+    },
     openMagicLink(token: string): PlayerSession & { invite: string | null } {
       const linkIndex = state.magicLinks.findIndex((link) => link.token === token);
       if (linkIndex === -1) {
         throw new Error("That magic link is no longer valid");
       }
       const link = state.magicLinks[linkIndex]!;
-      if (link.expiresAt === undefined || now >= link.expiresAt) {
+      if (!magicLinkIsValid(link)) {
         state.magicLinks.splice(linkIndex, 1);
         throw new Error("That magic link is no longer valid");
       }

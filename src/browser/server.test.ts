@@ -105,12 +105,14 @@ async function send(
   path: string,
   cookie: string | null,
   body?: Record<string, string> | URLSearchParams,
+  origin?: string,
 ): Promise<Reply> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method,
     headers: {
       ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}),
       ...(cookie ? { cookie } : {}),
+      ...(origin ? { origin } : {}),
     },
     body: body ? (body instanceof URLSearchParams ? body : new URLSearchParams(body)) : undefined,
     redirect: "manual",
@@ -267,10 +269,18 @@ function squareClass(body: string, index: string): string {
   return match[1];
 }
 
+async function confirmMagicLink(port: number, href: string): Promise<Reply> {
+  const confirmation = await send(port, "GET", href, null);
+  assert.equal(confirmation.status, 200);
+  const token = new URL(href, `http://127.0.0.1:${port}`).searchParams.get("token") ?? "";
+  assert.ok(token);
+  return send(port, "POST", "/magic", null, { token }, `http://127.0.0.1:${port}`);
+}
+
 async function signIn(port: number, label: string): Promise<string> {
   const sent = await send(port, "POST", "/sign-in", null, { email: `${label}-${Date.now()}@example.com` });
   const magic = sent.body.match(/<a href=\"([^\"]+)\">/)?.[1] ?? "";
-  const signed = await send(port, "GET", magic, null);
+  const signed = await confirmMagicLink(port, magic);
   const cookie = signed.cookie;
   assert.ok(cookie);
   await send(port, "POST", "/display-name", cookie, { displayName: `${label}${Date.now()}` });
@@ -310,6 +320,50 @@ function rejection(body: string, invite: string): void {
     [href],
   );
 }
+
+test("GET magic confirms without consuming; only a same-origin POST signs in", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  const localOrigin = `http://127.0.0.1:${port}`;
+  try {
+    const sent = await send(port, "POST", "/sign-in", null, { email: `confirm-${Date.now()}@example.com` });
+    const magic = sent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
+    const token = new URL(magic, localOrigin).searchParams.get("token") ?? "";
+    assert.ok(token);
+
+    const confirmation = await send(port, "GET", magic, null);
+    assert.equal(confirmation.status, 200);
+    assert.equal(confirmation.cookie, null);
+    assert.match(confirmation.body, /action="\/magic"/);
+    assert.match(confirmation.body, new RegExp(`name="token" value="${token}"`));
+
+    const scannedAgain = await send(port, "GET", magic, null);
+    assert.equal(scannedAgain.status, 200);
+    assert.equal(scannedAgain.cookie, null);
+
+    const invalid = await send(port, "GET", "/magic?token=not-valid", null);
+    assert.equal(invalid.status, 400);
+    assert.equal(invalid.cookie, null);
+    assert.match(invalid.body, /That magic link is no longer valid\./);
+
+    const missingOrigin = await send(port, "POST", "/magic", null, { token });
+    assert.equal(missingOrigin.status, 403);
+    const crossOrigin = await send(port, "POST", "/magic", null, { token }, "https://evil.example");
+    assert.equal(crossOrigin.status, 403);
+
+    const signed = await send(port, "POST", "/magic", null, { token }, localOrigin);
+    assert.equal(signed.status, 303);
+    assert.ok(signed.cookie);
+    assert.equal(signed.location, "/");
+
+    const replayed = await send(port, "POST", "/magic", null, { token }, localOrigin);
+    assert.equal(replayed.status, 400);
+    assert.match(replayed.body, /That magic link is no longer valid\./);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
 
 test("HTML and Session stream replies send the app security headers", async () => {
   const port = await freePort();
@@ -399,7 +453,7 @@ test("Profile shows this Player's display name and sends anyone else to Sign in"
     const email = `profile-${Date.now()}@example.com`;
     const sent = await send(port, "POST", "/sign-in", null, { email });
     const magic = sent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
-    const signed = await send(port, "GET", magic, null);
+    const signed = await confirmMagicLink(port, magic);
     const cookie = signed.cookie;
     assert.ok(cookie);
 
@@ -572,7 +626,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     const displayName = `Ada${Date.now()}`;
     const sent = await send(port, "POST", "/sign-in", null, { email: `ada${Date.now()}@example.com` });
     const magic = sent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
-    const signed = await send(port, "GET", magic, null);
+    const signed = await confirmMagicLink(port, magic);
     const cookie = signed.cookie;
     assert.ok(cookie);
     const unnamed = await send(port, "GET", "/", cookie);
@@ -854,7 +908,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     const samEmail = `sam${Date.now()}@example.com`;
     const samSent = await send(port, "POST", "/sign-in", null, { email: samEmail });
     const samMagic = samSent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
-    const samSigned = await send(port, "GET", samMagic, null);
+    const samSigned = await confirmMagicLink(port, samMagic);
     const sam = samSigned.cookie;
     assert.ok(sam);
     await send(port, "POST", "/display-name", sam, { displayName: samName });
@@ -980,7 +1034,7 @@ test("a signed-in Player sees the Grid and Words of a published Freestyle Crossw
   try {
     const sent = await send(port, "POST", "/sign-in", null, { email: `ada${stamp}@example.com` });
     const magic = sent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
-    const signed = await send(port, "GET", magic, null);
+    const signed = await confirmMagicLink(port, magic);
     const cookie = signed.cookie;
     assert.ok(cookie);
 
@@ -1406,7 +1460,7 @@ test("a repeated sign-in for the same address within 60 seconds returns 429 with
     assert.equal(firstKnown.status, 200);
     assert.match(firstKnown.body, /Open magic link/);
     const magic = firstKnown.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
-    const signed = await send(port, "GET", magic, null);
+    const signed = await confirmMagicLink(port, magic);
     assert.equal(signed.status, 303);
 
     const limitedKnown = await send(port, "POST", "/sign-in", null, { email: knownEmail });

@@ -828,6 +828,27 @@ test("a magic link older than 24 hours cannot sign anyone in, including legacy l
   assert.throws(() => legacy.openMagicLink("legacy-token"));
 });
 
+test("checking a magic link leaves it available to open", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const link = coOpword.requestMagicLink("ada@example.com");
+
+  assert.equal(coOpword.isMagicLinkValid(link.token), true);
+  assert.equal(coOpword.isMagicLinkValid(link.token), true);
+  assert.deepEqual(coOpword.whoAmI(coOpword.openMagicLink(link.token)), { displayName: null });
+});
+
+test("checking an expired magic link reports it invalid without changing state", () => {
+  const coOpword = openCoOpword();
+  coOpword.noteTime(0);
+  const link = coOpword.requestMagicLink("expired@example.com");
+  coOpword.noteTime(DAY);
+  const before = coOpword.snapshot();
+
+  assert.equal(coOpword.isMagicLinkValid(link.token), false);
+  assert.equal(coOpword.snapshot(), before);
+});
+
 test("issuing a later magic link removes expired and already-consumed links", () => {
   const coOpword = openCoOpword();
   coOpword.noteTime(0);

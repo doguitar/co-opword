@@ -736,8 +736,24 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/magic") {
+    const token = url.searchParams.get("token") ?? "";
+    if (!coOpword.isMagicLinkValid(token)) {
+      send(response, 400, message("That magic link is no longer valid."));
+    } else {
+      send(response, 200, frame(fill("magic-link-confirm.html", { token })));
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/magic") {
+    const expectedOrigin = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).origin : url.origin;
+    if (request.headers.origin !== expectedOrigin) {
+      send(response, 403, message("That confirmation must come from Co-opword."));
+      return;
+    }
+    const token = readBody(rawBody).get("token") ?? "";
     try {
-      const session = coOpword.openMagicLink(url.searchParams.get("token") ?? "");
+      const session = coOpword.openMagicLink(token);
       await save();
       const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
       send(response, 303, message("Signed in."), {

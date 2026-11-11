@@ -63,7 +63,9 @@ shutil.copyfile(shot, "regression/sign-in.png")
 
 `tab.waitFor(300)` is not a delay. The number is read as a selector. Use `asyncio.sleep` between submits.
 
-Sign in before any other shot. Fill the email, submit, and open the last `/magic?token=...` line in `data/magic-link-outbox.jsonl`. While Home still asks for a display name, set it to Relay. Open Profile, change the display name, and verify the greeting and field update, then restore Relay. Save `home.png` with the name set, the greeting, and no change form. Save `profile.png` with the name and the change control, and the menu closed.
+Start in a signed-out browser and save `sign-in.png`. Fill the email, submit, and open the last `/magic?token=...` line in `data/magic-link-outbox.jsonl`. Before clicking `Confirm sign in`, save `magic-link-confirmation.png` with the form visible. Click `Confirm sign in` to complete sign-in. While Home still asks for a display name, set it to Relay. Open Profile, change the display name, and verify the greeting and field update, then restore Relay. Save `home.png` with the name set, the greeting, and no change form. Save `profile.png` with the name and the change control, and the menu closed.
+
+After sign-in, reopen the original magic URL and verify the existing “That magic link is no longer valid.” message. Repeat with an expired token; it must show the same message.
 
 Then, in order:
 
@@ -81,6 +83,7 @@ Close the relay tab with `browser.close(name="coopword")`. The memory server hol
 | Page | Path | File |
 | --- | --- | --- |
 | Sign in | `/` with no Player cookie | `regression/sign-in.png` |
+| Magic-link confirmation | `GET /magic?token=...` before the confirmation POST | `regression/magic-link-confirmation.png` |
 | Home | `/` after a display name is set | `regression/home.png` |
 | Profile | `/profile` | `regression/profile.png` |
 | Library | `/library` | `regression/library.png` |
