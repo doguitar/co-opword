@@ -68,6 +68,14 @@ coopword.example.com {
 
 Caddy provisions HTTPS. The app sets `Secure` on the Player cookie in production; do not expose port 3000 directly or run production without HTTPS. The Node process also sends Content-Security-Policy, framing denial, `X-Content-Type-Options`, and Referrer-Policy on HTML and Session event-stream replies; leave HSTS to the HTTPS proxy after TLS is verified.
 
+## Container image
+
+GitHub Actions publishes the production image to GHCR (`ghcr.io/doguitar/co-opword`). Pin deployments to the exact OCI digest (`ghcr.io/doguitar/co-opword@sha256:…`); that digest is the deployment identity. Commit-SHA tags are discovery labels only—use them to find the digest for a given commit, not as the pin. Do not use a `latest` tag.
+
+The first GHCR publish creates the package as private; `docker push` cannot change visibility. After that first publish (on `master` or a published release—not from this draft PR), an owner must set the package to Public once in the GitHub package settings so anonymous pulls work. Public package visibility cannot be reverted to private. See [Configuring a package's access control and visibility](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
+
+The image runs Node 24 as non-root `node`, serves TypeScript directly via `npm start`, keeps durable state under the `/app/data` volume, and health-checks `http://127.0.0.1:$PORT/health` from inside the container. Pass runtime config (including `DATABASE_URL=sqlite:/app/data/coopword.sqlite`) via the environment or a mounted env file; do not bake secrets into the image.
+
 ## Database and recovery
 
 The SQLite database at `/var/lib/co-opword/coopword.sqlite` is the single source of durable product state. File-backed SQLite uses WAL; never copy the main database file by itself because committed writes can remain in `coopword.sqlite-wal`. Take consistent online backups with the in-container Node command; do not stop the service to copy the live file, and do not expose the backup directory over HTTP.
