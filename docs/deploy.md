@@ -70,15 +70,33 @@ Caddy provisions HTTPS. The app sets `Secure` on the Player cookie in production
 
 ## Database and recovery
 
-The SQLite database at `/var/lib/co-opword/coopword.sqlite` is the single source of durable product state. Back up that file to storage outside the host. A safe manual backup stops the service briefly:
+The SQLite database at `/var/lib/co-opword/coopword.sqlite` is the single source of durable product state. File-backed SQLite uses WAL; never copy the main database file by itself because committed writes can remain in `coopword.sqlite-wal`. Take consistent online backups with the in-container Node command; do not stop the service to copy the live file, and do not expose the backup directory over HTTP.
+
+For a container deployment, run from the host while the app container is running:
 
 ```sh
-systemctl stop co-opword
-cp /var/lib/co-opword/coopword.sqlite /var/backups/coopword-$(date +%F-%H%M%S).sqlite
-systemctl start co-opword
+docker exec co-opword npm run backup
 ```
 
-Restore by stopping the service, replacing the database with a known-good copy owned by `co-opword`, and starting the service. Schedule backups and test restores before inviting users. Postgres and MySQL snapshot adapters exist, but this app still requires a single process; a database alone does not provide multi-instance coordination.
+Optional path-safe updater label, normalized from an image digest by replacing `:` with `-` (example):
+
+```sh
+docker exec co-opword npm run backup -- --label sha256-0123456789abcdef
+```
+
+The command writes a timestamped SQLite backup beside the appdata database under `backups/`, prints `PRAGMA quick_check` status for that destination, and—only after verification—prunes this app's backups older than 30 days. Failures leave the live database and previous known-good backups untouched.
+
+Schedule that command daily on the host (cron, Unraid user script, or equivalent), and retain stdout/stderr so each `quick_check` result and backup path are recorded. There is no in-app backup scheduler.
+
+Before inviting users, test an isolated restore:
+
+1. Copy a selected backup to a scratch `coopword.sqlite`; never overwrite or mount the live database.
+2. Start a disposable container from the same image with only the scratch directory mounted at `/app/data`, a distinct container name, and no public port. Set `NODE_ENV=production`, `DATABASE_URL=sqlite:/app/data/coopword.sqlite`, `PUBLIC_URL=https://restore.invalid`, and disposable `SMTP_USER` / `SMTP_PASSWORD` values.
+3. Confirm the container becomes healthy and expected data opens. Stop/remove the container and delete the scratch copy.
+
+Backups stay in the local appdata `backups/` folder for now. Off-host rclone sync is out of scope; until it is configured, host or storage loss can destroy both the database and its backups.
+
+Restore into production by stopping the service, moving the existing database and any `coopword.sqlite-wal` / `coopword.sqlite-shm` sidecars aside, copying a verified backup into `coopword.sqlite` with ownership `co-opword`, and starting the service. Keep the old files until the restored app is verified. Postgres and MySQL snapshot adapters exist, but this app still requires a single process; a database alone does not provide multi-instance coordination.
 
 ## Operations
 
@@ -89,4 +107,4 @@ Restore by stopping the service, replacing the database with a known-good copy o
 - On `SIGTERM`, the process stops accepting new work, ends Session event streams, lets in-flight request and snapshot writes finish, and exits within 30 seconds (force-closing leftovers at that bound). Repeated `SIGTERM` is ignored after shutdown has started. `systemctl stop` / Docker stop should use a stop timeout of at least 30 seconds.
 - The Node process rejects request bodies larger than 256 KiB (262144 bytes) with HTTP 413. A declared `Content-Length` over the cap is refused before routing; an oversize body discovered while reading is refused before form parsing or product calls.
 - Unauthenticated sign-in magic-link emails are capped in-process: one per normalized address per 60 seconds, five per address per rolling hour, and 50 per rolling hour globally. Exceeded limits return HTTP 429 with `Retry-After` and the same retry copy for known and unknown addresses. Counters are memory-only and reset when the process restarts; client IPs are not recorded. One-time sign-in and invite tokens expire 24 hours after issuance. Authenticated invite emails are not counted against the issuance caps.
-- There is no automated backup job yet. Monitor the service process and container health, and verify backups manually.
+- Monitor the service process and container health.

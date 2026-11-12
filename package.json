@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --experimental-strip-types --test src/product/coopword.test.ts src/browser/server.test.ts src/browser/pages/build.test.js src/storage/snapshotStore.test.ts src/mail/magicLink.test.ts",
+    "test": "node --experimental-strip-types --test src/product/coopword.test.ts src/browser/server.test.ts src/browser/pages/build.test.js src/storage/snapshotStore.test.ts src/storage/backup.test.ts src/mail/magicLink.test.ts",
     "typecheck": "tsc --noEmit",
-    "start": "node --experimental-strip-types src/browser/server.ts"
+    "start": "node --experimental-strip-types src/browser/server.ts",
+    "backup": "node --experimental-strip-types src/storage/backup.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
