@@ -1,0 +1,14 @@
+.git
+node_modules
+data
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.test.ts
+**/*.test.js
+.github
+docs
+regression
+*.md
+tsconfig.json

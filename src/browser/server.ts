@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deliverLink } from "../mail/magicLink.ts";
-import { CrosswordRejected, DisplayNameTaken, openCoOpword, type PlayerSession } from "../product/coopword.ts";
+import { validateProductionConfig } from "../productionConfig.ts";
+import { CrosswordRejected, DisplayNameTaken, MagicLinkRateLimited, openCoOpword, type PlayerSession } from "../product/coopword.ts";
 import { openSnapshotStore } from "../storage/snapshotStore.ts";
 import { librarySeed } from "./librarySeed.ts";
 
@@ -14,6 +15,9 @@ try {
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 }
+
+validateProductionConfig();
+
 const port = Number(process.env.PORT ?? 3000);
 const pagesDir = join(here, "pages");
 const outboxPath = join(dataDir, "magic-link-outbox.jsonl");
@@ -80,14 +84,45 @@ function readCookie(request: IncomingMessage, name: string): string | undefined 
   return undefined;
 }
 
-async function readBody(request: IncomingMessage): Promise<URLSearchParams> {
+const maxBodyBytes = 262144;
+
+class BodyTooLargeError extends Error {}
+
+async function limitedBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(chunk as Buffer);
-  return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+  let size = 0;
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > maxBodyBytes) throw new BodyTooLargeError();
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+function readBody(raw: Buffer): URLSearchParams {
+  return new URLSearchParams(raw.toString("utf8"));
+}
+
+const securityHeaders = {
+  "content-security-policy":
+    "script-src 'self'; style-src 'self'; form-action 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'",
+  "x-frame-options": "DENY",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "same-origin",
+};
+
+function rejectTooLarge(request: IncomingMessage, response: ServerResponse): void {
+  const close = () => request.destroy();
+  if (response.headersSent) {
+    close();
+    return;
+  }
+  response.writeHead(413, { "content-type": "text/html; charset=utf-8", connection: "close", ...securityHeaders });
+  response.end(page(message("That request is too large.")), close);
 }
 
 function send(response: ServerResponse, status: number, main: string, headers: Record<string, string> = {}): void {
-  response.writeHead(status, { "content-type": "text/html; charset=utf-8", ...headers });
+  response.writeHead(status, { "content-type": "text/html; charset=utf-8", ...securityHeaders, ...headers });
   response.end(page(main));
 }
 
@@ -561,6 +596,12 @@ const streams = new Set<SessionStream>();
 const grace = new Map<string, ReturnType<typeof setTimeout>>();
 // A Session form POST drops this page's stream before the redirected page opens the next one.
 const reconnectGraceMs = 1500;
+const shutdownDeadlineMs = 30_000;
+let shuttingDown = false;
+
+function isLoopback(address: string | undefined): boolean {
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
 
 function streamKey(token: string, invite: string): string {
   return `${token}\0${invite}`;
@@ -609,29 +650,87 @@ function dropStream(stream: SessionStream): void {
 }
 
 const server = createServer(async (request, response) => {
+  const acceptedBeforeShutdown = !shuttingDown;
+
+  const contentLength = Number(request.headers["content-length"]);
+  if (Number.isFinite(contentLength) && contentLength > maxBodyBytes) {
+    rejectTooLarge(request, response);
+    return;
+  }
+
+  let rawBody: Buffer;
+  try {
+    rawBody = await limitedBody(request);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      rejectTooLarge(request, response);
+      return;
+    }
+    throw error;
+  }
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+
+  if (request.method === "GET" && url.pathname === "/health") {
+    if (!isLoopback(request.socket?.remoteAddress)) {
+      send(response, 404, message("Not found."));
+      return;
+    }
+    if (shuttingDown) {
+      response.writeHead(503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", connection: "close" });
+      response.end("unhealthy");
+      return;
+    }
+    try {
+      await store.check();
+      response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      response.end("healthy");
+    } catch {
+      response.writeHead(503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      response.end("unhealthy");
+    }
+    return;
+  }
+
+  if (!acceptedBeforeShutdown) {
+    response.writeHead(503, { connection: "close" });
+    response.end();
+    return;
+  }
+
   coOpword.noteTime(Date.now());
 
   if (request.method === "GET" && url.pathname === "/co-opword.css") {
-    response.writeHead(200, { "content-type": "text/css; charset=utf-8" });
+    response.writeHead(200, { "content-type": "text/css; charset=utf-8", ...securityHeaders });
     response.end(stylesheet);
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/session.js") {
-    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    response.writeHead(200, {
+      "content-type": "text/javascript; charset=utf-8",
+      "cache-control": "no-store",
+      ...securityHeaders,
+    });
     response.end(readFileSync(join(pagesDir, "session.js")));
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/menu.js") {
-    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    response.writeHead(200, {
+      "content-type": "text/javascript; charset=utf-8",
+      "cache-control": "no-store",
+      ...securityHeaders,
+    });
     response.end(readFileSync(join(pagesDir, "menu.js")));
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/build.js") {
-    response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+    response.writeHead(200, {
+      "content-type": "text/javascript; charset=utf-8",
+      "cache-control": "no-store",
+      ...securityHeaders,
+    });
     response.end(readFileSync(join(pagesDir, "build.js")));
     return;
   }
@@ -648,9 +747,18 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/sign-in") {
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     const email = body.get("email") ?? "";
-    const issued = coOpword.requestMagicLink(email);
+    let issued: { token: string; email: string };
+    try {
+      issued = coOpword.requestMagicLink(email);
+    } catch (error) {
+      if (error instanceof MagicLinkRateLimited) {
+        send(response, 429, message(error.message), { "retry-after": String(error.retryAfterSeconds) });
+        return;
+      }
+      throw error;
+    }
     await save();
     const href = `/magic?token=${encodeURIComponent(issued.token)}`;
     try {
@@ -667,8 +775,24 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/magic") {
+    const token = url.searchParams.get("token") ?? "";
+    if (!coOpword.isMagicLinkValid(token)) {
+      send(response, 400, message("That magic link is no longer valid."));
+    } else {
+      send(response, 200, frame(fill("magic-link-confirm.html", { token })));
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/magic") {
+    const expectedOrigin = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).origin : url.origin;
+    if (request.headers.origin !== expectedOrigin) {
+      send(response, 403, message("That confirmation must come from Co-opword."));
+      return;
+    }
+    const token = readBody(rawBody).get("token") ?? "";
     try {
-      const session = coOpword.openMagicLink(url.searchParams.get("token") ?? "");
+      const session = coOpword.openMagicLink(token);
       await save();
       const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
       send(response, 303, message("Signed in."), {
@@ -696,7 +820,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     const back = body.get("return") === "/profile" ? "/profile" : "/";
     try {
       coOpword.chooseDisplayName({ token }, body.get("displayName") ?? "");
@@ -816,7 +940,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/build") {
-    const built = readBuild(await readBody(request));
+    const built = readBuild(readBody(rawBody));
     const token = readCookie(request, "player");
     if (!built.token && (!token || !signedIn({ token }))) {
       send(response, 303, message("Sign in."), { location: "/" });
@@ -888,7 +1012,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     let issued;
     try {
       const crossword = JSON.parse(body.get("crossword") ?? "");
@@ -920,7 +1044,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && url.pathname === "/revise") {
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     try {
       coOpword.withdrawCrossword(body.get("token") ?? "");
       await save();
@@ -964,7 +1088,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     try {
       const author = body.get("author");
       const started = author === null ? coOpword.startSession({ token }, body.get("title") ?? "") : coOpword.startPublishedSession({ token }, body.get("title") ?? "", author);
@@ -1015,6 +1139,7 @@ const server = createServer(async (request, response) => {
       "content-type": "text/event-stream",
       "cache-control": "no-store",
       connection: "keep-alive",
+      ...securityHeaders,
     });
     response.write("retry: 500\n: open\n\n");
     response.on("close", () => dropStream(stream));
@@ -1109,7 +1234,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     const invite = body.get("invite") ?? "";
     const index = Number(body.get("index"));
     const sessionPath = `/session?invite=${encodeURIComponent(invite)}`;
@@ -1155,7 +1280,7 @@ const server = createServer(async (request, response) => {
       send(response, 303, message("Sign in."), { location: "/" });
       return;
     }
-    const body = await readBody(request);
+    const body = readBody(rawBody);
     const invite = body.get("invite") ?? "";
     try {
       if (url.pathname === "/session/invite") {
@@ -1224,6 +1349,40 @@ const server = createServer(async (request, response) => {
 
   send(response, 404, message("Not found."));
 });
+
+function shutDown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal}, shutting down`);
+  const openStreams = [...streams];
+  streams.clear();
+  for (const pending of grace.values()) clearTimeout(pending);
+  grace.clear();
+  for (const stream of openStreams) {
+    try {
+      stream.response.end();
+    } catch {
+      // Stream may already be closed.
+    }
+  }
+  const force = setTimeout(() => {
+    console.error("Shutdown timed out after 30 seconds");
+    server.closeAllConnections();
+    process.exit(1);
+  }, shutdownDeadlineMs);
+  server.close((error) => {
+    clearTimeout(force);
+    if (error) {
+      console.error("Error during shutdown");
+      process.exit(1);
+      return;
+    }
+    console.log("Shutdown complete");
+    process.exit(0);
+  });
+}
+
+process.on("SIGTERM", () => shutDown("SIGTERM"));
 
 server.listen(port, () => {
   console.log(`Co-opword listening on http://localhost:${port}`);

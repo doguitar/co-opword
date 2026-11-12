@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import http from "node:http";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -23,13 +26,28 @@ function freePort(): Promise<number> {
   });
 }
 
-async function startServer(port: number): Promise<ChildProcess> {
+type Started = { child: ChildProcess; output: () => string };
+
+async function startServer(port: number, env: Record<string, string | undefined> = {}): Promise<ChildProcess> {
+  const started = await startServerProcess(port, env);
+  return started.child;
+}
+
+async function startServerProcess(port: number, env: Record<string, string | undefined> = {}): Promise<Started> {
+  let output = "";
   const child = spawn(process.execPath, ["--experimental-strip-types", "src/browser/server.ts"], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), DATABASE_URL: "sqlite::memory:", SMTP_USER: "", SMTP_PASSWORD: "" },
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      PORT: String(port),
+      DATABASE_URL: "sqlite::memory:",
+      SMTP_USER: "",
+      SMTP_PASSWORD: "",
+      ...env,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  let output = "";
   child.stdout?.on("data", (chunk: Buffer) => {
     output += chunk.toString();
   });
@@ -41,10 +59,91 @@ async function startServer(port: number): Promise<ChildProcess> {
     if (child.exitCode !== null || Date.now() > deadline) throw new Error(output || "server did not listen");
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  return child;
+  return { child, output: () => output };
 }
 
-type Reply = { status: number; body: string; location: string | null; cookie: string | null; setCookie: string | null; type: string };
+async function startServerExpectExit(env: Record<string, string | undefined>): Promise<{ code: number | null; output: string }> {
+  const port = await freePort();
+  let output = "";
+  const child = spawn(process.execPath, ["--experimental-strip-types", "src/browser/server.ts"], {
+    cwd: root,
+    env: { ...process.env, PORT: String(port), ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout?.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  let timedOut = false;
+  // The startup watchdog must use real time to reap a child process if a regression leaves it running.
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+  }, 5_000);
+  try {
+    const [code] = await once(child, "exit");
+    if (timedOut) throw new Error(output || "server did not exit after invalid production config");
+    return { code: code as number | null, output };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+type SecurityHeaders = {
+  csp: string | null;
+  frameOptions: string | null;
+  nosniff: string | null;
+  referrerPolicy: string | null;
+};
+
+type Reply = {
+  status: number;
+  body: string;
+  location: string | null;
+  cookie: string | null;
+  setCookie: string | null;
+  type: string;
+  retryAfter: string | null;
+} & SecurityHeaders;
+
+function securityHeadersOf(response: Response): SecurityHeaders {
+  return {
+    csp: response.headers.get("content-security-policy"),
+    frameOptions: response.headers.get("x-frame-options"),
+    nosniff: response.headers.get("x-content-type-options"),
+    referrerPolicy: response.headers.get("referrer-policy"),
+  };
+}
+
+function assertAppSecurityHeaders(headers: SecurityHeaders): void {
+  assert.equal(
+    headers.csp,
+    "script-src 'self'; style-src 'self'; form-action 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'",
+  );
+  assert.equal(headers.frameOptions, "DENY");
+  assert.equal(headers.nosniff, "nosniff");
+  assert.equal(headers.referrerPolicy, "same-origin");
+  assert.equal(headers.csp?.includes("unsafe-inline"), false);
+  assert.equal(headers.csp?.includes("unsafe-eval"), false);
+}
+
+const maxBodyBytes = 262144;
+
+function replyFrom(response: Response, body: string): Reply {
+  const setCookie = response.headers.getSetCookie().find((entry) => entry.startsWith("player="));
+  return {
+    status: response.status,
+    body,
+    location: response.headers.get("location"),
+    cookie: setCookie ? setCookie.split(";")[0] : null,
+    setCookie: setCookie ?? null,
+    type: response.headers.get("content-type") ?? "",
+    retryAfter: response.headers.get("retry-after"),
+    ...securityHeadersOf(response),
+  };
+}
 
 async function send(
   port: number,
@@ -52,25 +151,147 @@ async function send(
   path: string,
   cookie: string | null,
   body?: Record<string, string> | URLSearchParams,
+  origin?: string,
 ): Promise<Reply> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method,
     headers: {
       ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}),
       ...(cookie ? { cookie } : {}),
+      ...(origin ? { origin } : {}),
     },
     body: body ? (body instanceof URLSearchParams ? body : new URLSearchParams(body)) : undefined,
     redirect: "manual",
   });
-  const setCookie = response.headers.getSetCookie().find((entry) => entry.startsWith("player="));
-  return {
-    status: response.status,
-    body: await response.text(),
-    location: response.headers.get("location"),
-    cookie: setCookie ? setCookie.split(";")[0] : null,
-    setCookie: setCookie ?? null,
-    type: response.headers.get("content-type") ?? "",
-  };
+  return replyFrom(response, await response.text());
+}
+
+function readHttpReply(response: http.IncomingMessage, resolve: (reply: Reply) => void): void {
+  const parts: Buffer[] = [];
+  response.on("data", (chunk: Buffer) => parts.push(chunk));
+  response.on("end", () => {
+    const setCookieHeader = response.headers["set-cookie"];
+    const setCookie = (Array.isArray(setCookieHeader) ? setCookieHeader : setCookieHeader ? [setCookieHeader] : []).find((entry) =>
+      entry.startsWith("player="),
+    );
+    resolve({
+      status: response.statusCode ?? 0,
+      body: Buffer.concat(parts).toString("utf8"),
+      location: typeof response.headers.location === "string" ? response.headers.location : null,
+      cookie: setCookie ? setCookie.split(";")[0] : null,
+      setCookie: setCookie ?? null,
+      type: typeof response.headers["content-type"] === "string" ? response.headers["content-type"] : "",
+      retryAfter: typeof response.headers["retry-after"] === "string" ? response.headers["retry-after"] : null,
+      csp: typeof response.headers["content-security-policy"] === "string" ? response.headers["content-security-policy"] : null,
+      frameOptions: typeof response.headers["x-frame-options"] === "string" ? response.headers["x-frame-options"] : null,
+      nosniff: typeof response.headers["x-content-type-options"] === "string" ? response.headers["x-content-type-options"] : null,
+      referrerPolicy: typeof response.headers["referrer-policy"] === "string" ? response.headers["referrer-policy"] : null,
+    });
+  });
+}
+
+function sendBytes(port: number, path: string, body: string): Promise<Reply> {
+  return new Promise((resolve, reject) => {
+    let gotResponse = false;
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": Buffer.byteLength(body),
+        },
+      },
+      (response) => {
+        gotResponse = true;
+        readHttpReply(response, resolve);
+      },
+    );
+    request.on("error", (error) => {
+      // Server may reset after a 413 while the client is still writing the body.
+      if (gotResponse && (error as NodeJS.ErrnoException).code === "ECONNRESET") return;
+      reject(error);
+    });
+    request.write(body);
+    request.end();
+  });
+}
+
+function sendChunked(port: number, path: string, chunks: string[], cookie: string | null = null): Promise<Reply> {
+  return new Promise((resolve, reject) => {
+    let gotResponse = false;
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "transfer-encoding": "chunked",
+          ...(cookie ? { cookie } : {}),
+        },
+      },
+      (response) => {
+        gotResponse = true;
+        readHttpReply(response, resolve);
+      },
+    );
+    request.on("error", (error) => {
+      if (gotResponse && (error as NodeJS.ErrnoException).code === "ECONNRESET") return;
+      reject(error);
+    });
+    for (const chunk of chunks) request.write(chunk);
+    request.end();
+  });
+}
+
+function sendDuringShutdown(
+  port: number,
+  path: string,
+  cookie: string,
+  body: URLSearchParams,
+  beforeFinishingBody: () => Promise<void>,
+): Promise<Reply> {
+  const encodedBody = body.toString();
+  return new Promise<Reply>((resolve, reject) => {
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": Buffer.byteLength(encodedBody),
+          expect: "100-continue",
+          cookie,
+        },
+      },
+      (response) => readHttpReply(response, resolve),
+    );
+    request.on("continue", () => {
+      const split = Math.floor(encodedBody.length / 2);
+      request.write(encodedBody.slice(0, split));
+      void beforeFinishingBody().then(
+        () => request.end(encodedBody.slice(split)),
+        (error: unknown) => {
+          request.destroy();
+          reject(error);
+        },
+      );
+    });
+    request.on("error", reject);
+    request.flushHeaders();
+  });
+}
+
+function formBody(email: string, size: number): string {
+  const prefix = `email=${encodeURIComponent(email)}&pad=`;
+  assert.ok(size >= prefix.length);
+  return prefix + "x".repeat(size - prefix.length);
 }
 
 type Watch = {
@@ -80,8 +301,9 @@ type Watch = {
   events: () => number;
   untilOpen: () => Promise<void>;
   untilCount: (count: number) => Promise<void>;
+  untilClosed: () => Promise<void>;
   stop: () => void;
-};
+} & SecurityHeaders;
 
 function watchSession(port: number, invite: string, cookie: string | null): Promise<Watch> {
   const controller = new AbortController();
@@ -90,6 +312,10 @@ function watchSession(port: number, invite: string, cookie: string | null): Prom
     signal: controller.signal,
   }).then(async (response) => {
     let text = "";
+    let resolveClosed: () => void = () => {};
+    const closed = new Promise<void>((resolve) => {
+      resolveClosed = resolve;
+    });
     if (response.ok && response.body) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -102,10 +328,13 @@ function watchSession(port: number, invite: string, cookie: string | null): Prom
           }
         } catch {
           // The test closed this stream.
+        } finally {
+          resolveClosed();
         }
       })();
     } else {
       text = await response.text();
+      resolveClosed();
     }
     const events = () => text.split("event: session").length - 1;
     const waitUntil = async (ready: () => boolean, detail: () => string) => {
@@ -122,9 +351,20 @@ function watchSession(port: number, invite: string, cookie: string | null): Prom
       events,
       untilOpen: () => waitUntil(() => text.includes(": open"), () => `stream ${response.status} ${JSON.stringify(text)}`),
       untilCount: (count: number) => waitUntil(() => events() >= count, () => `saw ${events()} session events in ${JSON.stringify(text)}`),
+      untilClosed: () => closed,
       stop: () => controller.abort(),
+      ...securityHeadersOf(response),
     };
   });
+}
+
+async function getHealth(port: number): Promise<{ status: number; body: string; type: string }> {
+  const response = await fetch(`http://127.0.0.1:${port}/health`);
+  return {
+    status: response.status,
+    body: await response.text(),
+    type: response.headers.get("content-type") ?? "",
+  };
 }
 
 function squareClass(body: string, index: string): string {
@@ -133,10 +373,18 @@ function squareClass(body: string, index: string): string {
   return match[1];
 }
 
+async function confirmMagicLink(port: number, href: string): Promise<Reply> {
+  const confirmation = await send(port, "GET", href, null);
+  assert.equal(confirmation.status, 200);
+  const token = new URL(href, `http://127.0.0.1:${port}`).searchParams.get("token") ?? "";
+  assert.ok(token);
+  return send(port, "POST", "/magic", null, { token }, `http://127.0.0.1:${port}`);
+}
+
 async function signIn(port: number, label: string): Promise<string> {
   const sent = await send(port, "POST", "/sign-in", null, { email: `${label}-${Date.now()}@example.com` });
   const magic = sent.body.match(/<a href=\"([^\"]+)\">/)?.[1] ?? "";
-  const signed = await send(port, "GET", magic, null);
+  const signed = await confirmMagicLink(port, magic);
   const cookie = signed.cookie;
   assert.ok(cookie);
   await send(port, "POST", "/display-name", cookie, { displayName: `${label}${Date.now()}` });
@@ -176,6 +424,82 @@ function rejection(body: string, invite: string): void {
     [href],
   );
 }
+
+test("GET magic confirms without consuming; only a same-origin POST signs in", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  const localOrigin = `http://127.0.0.1:${port}`;
+  try {
+    const sent = await send(port, "POST", "/sign-in", null, { email: `confirm-${Date.now()}@example.com` });
+    const magic = sent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
+    const token = new URL(magic, localOrigin).searchParams.get("token") ?? "";
+    assert.ok(token);
+
+    const confirmation = await send(port, "GET", magic, null);
+    assert.equal(confirmation.status, 200);
+    assert.equal(confirmation.cookie, null);
+    assert.match(confirmation.body, /action="\/magic"/);
+    assert.match(confirmation.body, new RegExp(`name="token" value="${token}"`));
+
+    const scannedAgain = await send(port, "GET", magic, null);
+    assert.equal(scannedAgain.status, 200);
+    assert.equal(scannedAgain.cookie, null);
+
+    const invalid = await send(port, "GET", "/magic?token=not-valid", null);
+    assert.equal(invalid.status, 400);
+    assert.equal(invalid.cookie, null);
+    assert.match(invalid.body, /That magic link is no longer valid\./);
+
+    const missingOrigin = await send(port, "POST", "/magic", null, { token });
+    assert.equal(missingOrigin.status, 403);
+    const crossOrigin = await send(port, "POST", "/magic", null, { token }, "https://evil.example");
+    assert.equal(crossOrigin.status, 403);
+
+    const signed = await send(port, "POST", "/magic", null, { token }, localOrigin);
+    assert.equal(signed.status, 303);
+    assert.ok(signed.cookie);
+    assert.equal(signed.location, "/");
+
+    const replayed = await send(port, "POST", "/magic", null, { token }, localOrigin);
+    assert.equal(replayed.status, 400);
+    assert.match(replayed.body, /That magic link is no longer valid\./);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
+test("HTML and Session stream replies send the app security headers", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  let stream: Watch | undefined;
+  try {
+    const page = await send(port, "GET", "/", null);
+    assert.equal(page.status, 200);
+    assert.match(page.type, /text\/html/);
+    assertAppSecurityHeaders(page);
+
+    const cookie = await signIn(port, "headers");
+    const started = await send(port, "POST", "/session", cookie, { title: "First Row" });
+    const invite = new URL(started.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
+    assert.equal(started.status, 303);
+    assertAppSecurityHeaders(started);
+
+    stream = await watchSession(port, invite, cookie);
+    assert.equal(stream.status, 200);
+    assert.match(stream.type, /text\/event-stream/);
+    assertAppSecurityHeaders(stream);
+    await stream.untilOpen();
+
+    const stylesheet = await send(port, "GET", "/co-opword.css", null);
+    assert.equal(stylesheet.status, 200);
+    assert.equal(stylesheet.nosniff, "nosniff");
+  } finally {
+    stream?.stop();
+    child.kill();
+    await once(child, "exit");
+  }
+});
 
 test("a signed-in Player signs out from the menu", async () => {
   const port = await freePort();
@@ -233,7 +557,7 @@ test("Profile shows this Player's display name and sends anyone else to Sign in"
     const email = `profile-${Date.now()}@example.com`;
     const sent = await send(port, "POST", "/sign-in", null, { email });
     const magic = sent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
-    const signed = await send(port, "GET", magic, null);
+    const signed = await confirmMagicLink(port, magic);
     const cookie = signed.cookie;
     assert.ok(cookie);
 
@@ -406,7 +730,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     const displayName = `Ada${Date.now()}`;
     const sent = await send(port, "POST", "/sign-in", null, { email: `ada${Date.now()}@example.com` });
     const magic = sent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
-    const signed = await send(port, "GET", magic, null);
+    const signed = await confirmMagicLink(port, magic);
     const cookie = signed.cookie;
     assert.ok(cookie);
     const unnamed = await send(port, "GET", "/", cookie);
@@ -688,7 +1012,7 @@ test("a rejected letter leaves the Locked letter and links back to that Session"
     const samEmail = `sam${Date.now()}@example.com`;
     const samSent = await send(port, "POST", "/sign-in", null, { email: samEmail });
     const samMagic = samSent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
-    const samSigned = await send(port, "GET", samMagic, null);
+    const samSigned = await confirmMagicLink(port, samMagic);
     const sam = samSigned.cookie;
     assert.ok(sam);
     await send(port, "POST", "/display-name", sam, { displayName: samName });
@@ -814,7 +1138,7 @@ test("a signed-in Player sees the Grid and Words of a published Freestyle Crossw
   try {
     const sent = await send(port, "POST", "/sign-in", null, { email: `ada${stamp}@example.com` });
     const magic = sent.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
-    const signed = await send(port, "GET", magic, null);
+    const signed = await confirmMagicLink(port, magic);
     const cookie = signed.cookie;
     assert.ok(cookie);
 
@@ -1174,3 +1498,314 @@ test("changing Build size keeps the overlapping squares and the clues at those c
     }
   }
 });
+
+test("a request body over 256 KiB is rejected with 413 and does not issue a magic link", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const oversizeEmail = `oversize-${Date.now()}@example.com`;
+    const oversize = await sendBytes(port, "/sign-in", formBody(oversizeEmail, maxBodyBytes + 1));
+    assert.equal(oversize.status, 413);
+    assert.equal(oversize.cookie, null);
+    assert.doesNotMatch(oversize.body, /\/magic\?token=/);
+    assert.doesNotMatch(oversize.body, /Open magic link/);
+
+    const boundaryEmail = `boundary-${Date.now()}@example.com`;
+    const boundary = formBody(boundaryEmail, maxBodyBytes);
+    assert.equal(Buffer.byteLength(boundary), maxBodyBytes);
+    const atLimit = await sendBytes(port, "/sign-in", boundary);
+    assert.notEqual(atLimit.status, 413);
+    assert.match(atLimit.body, /Open magic link/);
+    assert.match(atLimit.body, /\/magic\?token=/);
+
+    const chunked = await sendChunked(port, "/sign-in", [
+      formBody(`chunked-${Date.now()}@example.com`, maxBodyBytes - 1000),
+      "x".repeat(2000),
+    ]);
+    assert.equal(chunked.status, 413);
+    assert.equal(chunked.cookie, null);
+    assert.doesNotMatch(chunked.body, /\/magic\?token=/);
+
+    const fresh = await send(port, "POST", "/sign-in", null, { email: `fresh-${Date.now()}@example.com` });
+    assert.equal(fresh.status, 200);
+    assert.match(fresh.body, /Open magic link/);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
+test("a chunked body over 256 KiB is rejected with 413 before a body-free route runs", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const cookie = await signIn(port, "chunk-sign-out");
+    const oversize = await sendChunked(port, "/sign-out", ["x".repeat(maxBodyBytes + 1)], cookie);
+    assert.equal(oversize.status, 413);
+    assert.equal(oversize.setCookie, null);
+    assertAppSecurityHeaders(oversize);
+    assert.match(oversize.body, /That request is too large/);
+    const stillIn = await send(port, "GET", "/", cookie);
+    assert.equal(stillIn.status, 200);
+    assert.doesNotMatch(stillIn.body, /action="\/sign-in"/);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
+test("a repeated sign-in for the same address within 60 seconds returns 429 with Retry-After and identical feedback for known and unknown addresses", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const knownEmail = `known-${Date.now()}@example.com`;
+    const unknownEmail = `unknown-${Date.now()}@example.com`;
+    const firstKnown = await send(port, "POST", "/sign-in", null, { email: knownEmail });
+    assert.equal(firstKnown.status, 200);
+    assert.match(firstKnown.body, /Open magic link/);
+    const magic = firstKnown.body.match(/<a href="([^"]+)">/)?.[1] ?? "";
+    const signed = await confirmMagicLink(port, magic);
+    assert.equal(signed.status, 303);
+
+    const limitedKnown = await send(port, "POST", "/sign-in", null, { email: knownEmail });
+    assert.equal(limitedKnown.status, 429);
+    assert.match(limitedKnown.body, /Too many sign-in emails\. Try again in (\d+) seconds\./);
+    const knownSeconds = limitedKnown.body.match(/Try again in (\d+) seconds/)?.[1] ?? "";
+    assert.equal(limitedKnown.retryAfter, knownSeconds);
+    assert.ok(Number(knownSeconds) >= 1 && Number(knownSeconds) <= 60);
+    assert.doesNotMatch(limitedKnown.body, /\/magic\?token=/);
+    assert.equal(limitedKnown.cookie, null);
+
+    const firstUnknown = await send(port, "POST", "/sign-in", null, { email: unknownEmail });
+    assert.equal(firstUnknown.status, 200);
+    const limitedUnknown = await send(port, "POST", "/sign-in", null, { email: unknownEmail });
+    assert.equal(limitedUnknown.status, 429);
+    assert.match(limitedUnknown.body, /Too many sign-in emails\. Try again in (\d+) seconds\./);
+    assert.equal(limitedUnknown.retryAfter, limitedUnknown.body.match(/Try again in (\d+) seconds/)?.[1] ?? null);
+    assert.equal(limitedKnown.body.includes(knownEmail), false);
+    assert.equal(limitedUnknown.body.includes(unknownEmail), false);
+    assert.equal(
+      limitedKnown.body.replace(/Try again in \d+ seconds/, "Try again in N seconds"),
+      limitedUnknown.body.replace(/Try again in \d+ seconds/, "Try again in N seconds"),
+    );
+    assert.doesNotMatch(limitedUnknown.body, /\/magic\?token=/);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+});
+
+test("the fifty-first distinct sign-in address within an hour returns 429 and leaves in-limit sign-in unchanged on a fresh server", async () => {
+  const port = await freePort();
+  const child = await startServer(port);
+  try {
+    const stamp = Date.now();
+    for (let index = 0; index < 50; index += 1) {
+      const issued = await send(port, "POST", "/sign-in", null, { email: `global-${stamp}-${index}@example.com` });
+      assert.equal(issued.status, 200, `issuance ${index}`);
+      assert.match(issued.body, /Open magic link/);
+    }
+    const limited = await send(port, "POST", "/sign-in", null, { email: `global-${stamp}-overflow@example.com` });
+    assert.equal(limited.status, 429);
+    assert.match(limited.body, /Too many sign-in emails\. Try again in (\d+) seconds\./);
+    assert.equal(limited.retryAfter, limited.body.match(/Try again in (\d+) seconds/)?.[1] ?? null);
+    assert.doesNotMatch(limited.body, /\/magic\?token=/);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+  }
+
+  const freshPort = await freePort();
+  const fresh = await startServer(freshPort);
+  try {
+    const ok = await send(freshPort, "POST", "/sign-in", null, { email: `fresh-${Date.now()}@example.com` });
+    assert.equal(ok.status, 200);
+    assert.match(ok.body, /Open magic link/);
+    assert.equal(ok.retryAfter, null);
+  } finally {
+    fresh.kill();
+    await once(fresh, "exit");
+  }
+});
+
+test("production startup fails fast when required config is missing", async () => {
+  const failed = await startServerExpectExit({
+    NODE_ENV: "production",
+    DATABASE_URL: "",
+    PUBLIC_URL: "",
+    SMTP_USER: "",
+    SMTP_PASSWORD: "",
+  });
+  assert.notEqual(failed.code, 0);
+  assert.match(failed.output, /Missing required configuration: DATABASE_URL, PUBLIC_URL, SMTP_USER, SMTP_PASSWORD/);
+  assert.doesNotMatch(failed.output, /Co-opword listening/);
+});
+
+test("production startup rejects invalid PUBLIC_URL without printing its value", async () => {
+  const publicUrl = "http://insecure.example/path";
+  const failed = await startServerExpectExit({
+    NODE_ENV: "production",
+    DATABASE_URL: "sqlite:/unused.sqlite",
+    PUBLIC_URL: publicUrl,
+    SMTP_USER: "mailer@example.test",
+    SMTP_PASSWORD: "smtp-password-value",
+  });
+  assert.notEqual(failed.code, 0);
+  assert.match(failed.output, /Invalid configuration: PUBLIC_URL/);
+  assert.equal(failed.output.includes(publicUrl), false);
+  assert.equal(failed.output.includes("smtp-password-value"), false);
+});
+
+test("production startup rejects invalid port and SMTP transport settings", async () => {
+  const invalidValues: [string, string][] = [
+    ["PORT", "65536"],
+    ["SMTP_PORT", "0"],
+    ["SMTP_SECURE", "yes"],
+  ];
+  for (const [name, value] of invalidValues) {
+    const failed = await startServerExpectExit({
+      NODE_ENV: "production",
+      DATABASE_URL: "sqlite:/unused.sqlite",
+      PUBLIC_URL: "https://coopword.example.test",
+      SMTP_USER: "mailer@example.test",
+      SMTP_PASSWORD: "smtp-password-value",
+      [name]: value,
+    });
+    assert.notEqual(failed.code, 0);
+    assert.ok(failed.output.includes(`Invalid configuration: ${name}`));
+    assert.equal(failed.output.includes(value), false);
+  }
+});
+
+test("production startup rejects in-memory SQLite", async () => {
+  const secret = "smtp-memory-secret";
+  const failed = await startServerExpectExit({
+    NODE_ENV: "production",
+    DATABASE_URL: "sqlite::memory:",
+    PUBLIC_URL: "https://coopword.example.test",
+    SMTP_USER: "mailer@example.test",
+    SMTP_PASSWORD: secret,
+  });
+  assert.notEqual(failed.code, 0);
+  assert.match(failed.output, /Invalid configuration: DATABASE_URL/);
+  assert.equal(failed.output.includes(secret), false);
+});
+
+test("production startup succeeds with required config and does not contact SMTP", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "coopword-production-"));
+  const dbPath = join(dir, "coopword.sqlite").replaceAll("\\", "/");
+  const port = await freePort();
+  const started = await startServerProcess(port, {
+    NODE_ENV: "production",
+    DATABASE_URL: `sqlite:${dbPath}`,
+    PUBLIC_URL: "https://coopword.example.test",
+    SMTP_USER: "mailer@example.test",
+    SMTP_PASSWORD: "smtp-password-value",
+    SMTP_HOST: "127.0.0.1",
+    SMTP_PORT: "1",
+    SMTP_SECURE: "false",
+  });
+  try {
+    assert.match(started.output(), /Co-opword listening/);
+    assert.equal(started.output().includes("smtp-password-value"), false);
+    const health = await getHealth(port);
+    assert.equal(health.status, 200);
+    assert.equal(health.body, "healthy");
+  } finally {
+    started.child.kill();
+    await once(started.child, "exit");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("GET /health reports healthy or unhealthy status without diagnostics", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "coopword-health-"));
+  const dbPath = join(dir, "coopword.sqlite").replaceAll("\\", "/");
+  const port = await freePort();
+  const child = await startServer(port, { DATABASE_URL: `sqlite:${dbPath}` });
+  try {
+    const healthy = await getHealth(port);
+    assert.equal(healthy.status, 200);
+    assert.equal(healthy.body, "healthy");
+    assert.match(healthy.type, /text\/plain/);
+    assert.equal(healthy.body.includes(dbPath), false);
+    assert.equal(healthy.body.toLowerCase().includes("sqlite"), false);
+    assert.equal(healthy.body.includes(dir), false);
+
+    const db = new DatabaseSync(dbPath);
+    db.exec("DROP TABLE snapshot_store");
+    db.close();
+
+    const unhealthy = await getHealth(port);
+    assert.equal(unhealthy.status, 503);
+    assert.equal(unhealthy.body, "unhealthy");
+    assert.match(unhealthy.type, /text\/plain/);
+    assert.equal(unhealthy.body.includes(dbPath), false);
+    assert.equal(unhealthy.body.toLowerCase().includes("sqlite"), false);
+    assert.equal(unhealthy.body.includes("Error"), false);
+    assert.equal(unhealthy.body.includes(dir), false);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test(
+  "SIGTERM drains an in-flight write, closes SSE, and exits within 30 seconds",
+  { skip: process.platform === "win32" ? "Windows does not deliver SIGTERM to child process handlers" : false },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "coopword-shutdown-"));
+    const dbPath = join(dir, "coopword.sqlite").replaceAll("\\", "/");
+    const port = await freePort();
+    const started = await startServerProcess(port, { DATABASE_URL: `sqlite:${dbPath}` });
+    const child = started.child;
+    const exited = once(child, "exit");
+    const began = Date.now();
+    try {
+      const cookie = await signIn(port, "shutdown");
+      const startedSession = await send(port, "POST", "/session", cookie, { title: "First Row" });
+      const invite = new URL(startedSession.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
+      assert.ok(invite);
+      await send(port, "POST", "/session/select", cookie, { invite, index: "0" });
+      const stream = await watchSession(port, invite, cookie);
+      await stream.untilOpen();
+
+      const write = sendDuringShutdown(
+        port,
+        "/session/letter",
+        cookie,
+        new URLSearchParams({ invite, index: "0", letter: "A" }),
+        async () => {
+          const shutdownLog = once(child.stdout!, "data").then(([chunk]) => chunk);
+          const exitedEarly = exited.then(() => {
+            throw new Error("server exited before beginning shutdown");
+          });
+          assert.equal(child.kill("SIGTERM"), true);
+          const chunk = await Promise.race([shutdownLog, exitedEarly]);
+          assert.match(chunk.toString(), /Received SIGTERM, shutting down/);
+        },
+      );
+      const written = await write;
+      assert.equal(written.status, 303);
+      await stream.untilClosed();
+
+      const [code] = await exited;
+      assert.equal(code, 0);
+      assert.ok(Date.now() - began < 30_000);
+      assert.match(started.output(), /Shutdown complete/);
+
+      const db = new DatabaseSync(dbPath);
+      const row = db.prepare("SELECT snapshot FROM snapshot_store WHERE id = 1").get() as { snapshot: string } | undefined;
+      db.close();
+      assert.match(row?.snapshot ?? "", /"letters":\["A"/);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill();
+        await exited;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+

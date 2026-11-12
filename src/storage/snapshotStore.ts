@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 export type SnapshotStore = {
   read(): Promise<string | undefined>;
   write(snapshot: string): Promise<void>;
+  check(): Promise<void>;
 };
 
 const schema = `CREATE TABLE IF NOT EXISTS snapshot_store (
@@ -12,11 +13,18 @@ const schema = `CREATE TABLE IF NOT EXISTS snapshot_store (
   snapshot TEXT NOT NULL
 )`;
 
+export function resolveSqliteDatabasePath(databaseUrl: string | undefined, dataDir: string): string {
+  const url = databaseUrl ?? "";
+  if (url === "") return join(dataDir, "coopword.sqlite");
+  if (schemeOf(url) !== "sqlite") throw new Error("DATABASE_URL scheme is not supported");
+  return sqliteLocation(url);
+}
+
 export async function openSnapshotStore(databaseUrl: string | undefined, dataDir: string): Promise<SnapshotStore> {
   const url = databaseUrl ?? "";
-  if (url === "") return openSqlite(join(dataDir, "coopword.sqlite"));
+  if (url === "") return openSqlite(resolveSqliteDatabasePath(undefined, dataDir));
   const scheme = schemeOf(url);
-  if (scheme === "sqlite") return openSqlite(sqliteLocation(url));
+  if (scheme === "sqlite") return openSqlite(resolveSqliteDatabasePath(url, dataDir));
   if (scheme === "postgres" || scheme === "postgresql") return openPostgres(url);
   if (scheme === "mysql") return openMysql(url);
   throw new Error("DATABASE_URL scheme is not supported");
@@ -37,11 +45,29 @@ function sqliteLocation(url: string): string {
   return path;
 }
 
+export function isFileBackedSqliteUrl(url: string): boolean {
+  try {
+    return schemeOf(url) === "sqlite" && sqliteLocation(url) !== ":memory:";
+  } catch {
+    return false;
+  }
+}
+
 function openSqlite(path: string): SnapshotStore {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
-  db.exec(schema);
+  try {
+    if (path !== ":memory:") {
+      const mode = db.prepare("PRAGMA journal_mode = WAL").get() as { journal_mode: string };
+      if (mode.journal_mode !== "wal") throw new Error("SQLite WAL mode could not be enabled");
+    }
+    db.exec(schema);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   const select = db.prepare("SELECT snapshot FROM snapshot_store WHERE id = 1");
+  const probe = db.prepare("SELECT 1 FROM snapshot_store LIMIT 1");
   const upsert = db.prepare(
     `INSERT INTO snapshot_store (id, snapshot) VALUES (1, ?)
      ON CONFLICT(id) DO UPDATE SET snapshot = excluded.snapshot`,
@@ -53,6 +79,9 @@ function openSqlite(path: string): SnapshotStore {
     },
     async write(snapshot: string) {
       upsert.run(snapshot);
+    },
+    async check() {
+      probe.get();
     },
   };
 }
@@ -75,6 +104,9 @@ async function openPostgres(url: string): Promise<SnapshotStore> {
         [snapshot],
       );
     },
+    async check() {
+      await client.query("SELECT 1 FROM snapshot_store LIMIT 1");
+    },
   };
 }
 
@@ -96,6 +128,9 @@ async function openMysql(url: string): Promise<SnapshotStore> {
         "INSERT INTO snapshot_store (id, snapshot) VALUES (1, ?) ON DUPLICATE KEY UPDATE snapshot = ?",
         [snapshot, snapshot],
       );
+    },
+    async check() {
+      await connection.query("SELECT 1 FROM snapshot_store LIMIT 1");
     },
   };
 }

@@ -17,25 +17,33 @@ export async function deliverLink(
     return "outbox";
   }
   if (!SMTP_USER || !SMTP_PASSWORD) throw new Error("SMTP_USER and SMTP_PASSWORD must both be configured");
-  const publicUrl = process.env.PUBLIC_URL;
-  if (!publicUrl) throw new Error("PUBLIC_URL is required for email delivery");
-  const origin = new URL(publicUrl);
-  if (origin.protocol !== "https:" || origin.pathname !== "/" || origin.search || origin.hash) {
-    throw new Error("PUBLIC_URL must be an HTTPS origin");
+
+  const mail = inspectMailConfiguration();
+  if (mail.missing.length > 0) {
+    const message = mail.missing.includes("PUBLIC_URL")
+      ? "PUBLIC_URL is required for email delivery"
+      : "SMTP_USER and SMTP_PASSWORD must both be configured";
+    throw new Error(message);
   }
-  const port = Number(process.env.SMTP_PORT ?? 465);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("SMTP_PORT must be a valid port");
-  const secureValue = process.env.SMTP_SECURE;
-  if (secureValue !== undefined && secureValue !== "true" && secureValue !== "false") {
-    throw new Error("SMTP_SECURE must be true or false");
+  if (mail.invalid.length > 0) {
+    const key = mail.invalid[0];
+    throw new Error(
+      key === "PUBLIC_URL"
+        ? "PUBLIC_URL must be an HTTPS origin"
+        : key === "SMTP_PORT"
+          ? "SMTP_PORT must be a valid port"
+          : "SMTP_SECURE must be true or false",
+    );
   }
+  const settings = mail.settings;
+  if (!settings) throw new Error("Mail configuration is unavailable");
   const transport = nodemailer.createTransport({
-    host: process.env.SMTP_HOST ?? "smtp.purelymail.com",
-    port,
-    secure: secureValue === undefined ? port === 465 : secureValue === "true",
-    auth: { user: SMTP_USER, pass: SMTP_PASSWORD },
+    host: settings.host,
+    port: settings.port,
+    secure: settings.secure,
+    auth: { user: settings.user, pass: settings.password },
   });
-  const href = new URL(path, origin).href;
+  const href = new URL(path, settings.origin).href;
   const html = `
     <div style="display:none;max-height:0;overflow:hidden">Use this Co-opword link to continue.</div>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f4;padding:32px 12px;font-family:Georgia,'Times New Roman',serif;color:#1a1a1a">
@@ -56,13 +64,74 @@ export async function deliverLink(
       </td></tr>
     </table>`;
   await transport.sendMail({
-    from: process.env.MAIL_FROM ?? "donotreply@updo.gg",
+    from: settings.from,
     to: email,
     subject,
     text: `${subject}\n\nContinue to Co-opword: ${href}\n\nIf you weren't expecting this email, you can ignore it.`,
     html,
   });
   return "smtp";
+}
+
+export function inspectMailConfiguration(): {
+  settings?: {
+    user: string;
+    password: string;
+    origin: URL;
+    host: string;
+    port: number;
+    secure: boolean;
+    from: string;
+  };
+  missing: string[];
+  invalid: string[];
+} {
+  const missing: string[] = [];
+  const invalid: string[] = [];
+  const SMTP_USER = process.env.SMTP_USER;
+  const SMTP_PASSWORD = process.env.SMTP_PASSWORD;
+  const publicUrl = process.env.PUBLIC_URL;
+  if (!publicUrl?.trim()) missing.push("PUBLIC_URL");
+  if (!SMTP_USER?.trim()) missing.push("SMTP_USER");
+  if (!SMTP_PASSWORD?.trim()) missing.push("SMTP_PASSWORD");
+  if (missing.length > 0) return { missing, invalid };
+
+  let origin: URL | undefined;
+  try {
+    origin = new URL(publicUrl!);
+    if (
+      origin.protocol !== "https:" ||
+      origin.pathname !== "/" ||
+      origin.search ||
+      origin.hash ||
+      origin.username ||
+      origin.password
+    ) {
+      invalid.push("PUBLIC_URL");
+    }
+  } catch {
+    invalid.push("PUBLIC_URL");
+  }
+  const port = Number(process.env.SMTP_PORT ?? 465);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) invalid.push("SMTP_PORT");
+  const secureValue = process.env.SMTP_SECURE;
+  if (secureValue !== undefined && secureValue !== "true" && secureValue !== "false") {
+    invalid.push("SMTP_SECURE");
+  }
+  if (invalid.length > 0) return { missing, invalid };
+  return {
+    missing,
+    invalid,
+    settings: {
+      user: SMTP_USER!,
+      password: SMTP_PASSWORD!,
+      origin: origin!,
+      host: process.env.SMTP_HOST ?? "smtp.purelymail.com",
+      port,
+      secure: secureValue === undefined ? port === 465 : secureValue === "true",
+      from: process.env.MAIL_FROM ?? "donotreply@updo.gg",
+    },
+  };
 }
 
 function escapeHtml(value: string): string {
