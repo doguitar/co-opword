@@ -46,6 +46,7 @@ WorkingDirectory=/opt/co-opword
 EnvironmentFile=/etc/co-opword/environment
 ExecStart=/usr/bin/npm start
 Restart=on-failure
+TimeoutStopSec=30
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/var/lib/co-opword
@@ -60,6 +61,7 @@ Example Caddy site:
 
 ```caddy
 coopword.example.com {
+    respond /health 404
     reverse_proxy 127.0.0.1:3000
 }
 ```
@@ -81,7 +83,10 @@ Restore by stopping the service, replacing the database with a known-good copy o
 ## Operations
 
 - Run `npm test` and `npm run typecheck` before deployment; CI runs both on pushes and pull requests.
-- Use `journalctl -u co-opword` for the Node process log.
+- Use `journalctl -u co-opword` for the Node process log. Application lifecycle and errors go to stdout/stderr; logs name configuration keys when startup validation fails and never print secret or config values.
+- When `NODE_ENV=production`, startup requires a file-backed SQLite `DATABASE_URL` (in-memory SQLite is rejected), HTTPS `PUBLIC_URL`, `SMTP_USER`, and `SMTP_PASSWORD`, and validates `PORT` / `SMTP_PORT` / `SMTP_SECURE` syntax when those are set. `PORT` defaults to `3000`; SMTP host/port/TLS and `MAIL_FROM` keep their Purelymail-compatible defaults. SMTP network reachability is not checked at startup.
+- `GET /health` is loopback-only. It returns plain `healthy` (200) or `unhealthy` (503) after a lightweight SQLite usability check and does not expose paths, credentials, or diagnostics. Point the container health check at `http://127.0.0.1:$PORT/health`; do not publish this route through the reverse proxy.
+- On `SIGTERM`, the process stops accepting new work, ends Session event streams, lets in-flight request and snapshot writes finish, and exits within 30 seconds (force-closing leftovers at that bound). Repeated `SIGTERM` is ignored after shutdown has started. `systemctl stop` / Docker stop should use a stop timeout of at least 30 seconds.
 - The Node process rejects request bodies larger than 256 KiB (262144 bytes) with HTTP 413. A declared `Content-Length` over the cap is refused before routing; an oversize body discovered while reading is refused before form parsing or product calls.
 - Unauthenticated sign-in magic-link emails are capped in-process: one per normalized address per 60 seconds, five per address per rolling hour, and 50 per rolling hour globally. Exceeded limits return HTTP 429 with `Retry-After` and the same retry copy for known and unknown addresses. Counters are memory-only and reset when the process restarts; client IPs are not recorded. One-time sign-in and invite tokens expire 24 hours after issuance. Authenticated invite emails are not counted against the issuance caps.
-- The application has no health endpoint, automated backup job, or graceful-shutdown handler yet. Monitor the service process and verify backups manually; add these before relying on unattended recovery.
+- There is no automated backup job yet. Monitor the service process and container health, and verify backups manually.

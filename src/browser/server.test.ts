@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -24,13 +26,28 @@ function freePort(): Promise<number> {
   });
 }
 
-async function startServer(port: number): Promise<ChildProcess> {
+type Started = { child: ChildProcess; output: () => string };
+
+async function startServer(port: number, env: Record<string, string | undefined> = {}): Promise<ChildProcess> {
+  const started = await startServerProcess(port, env);
+  return started.child;
+}
+
+async function startServerProcess(port: number, env: Record<string, string | undefined> = {}): Promise<Started> {
+  let output = "";
   const child = spawn(process.execPath, ["--experimental-strip-types", "src/browser/server.ts"], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), DATABASE_URL: "sqlite::memory:", SMTP_USER: "", SMTP_PASSWORD: "" },
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      PORT: String(port),
+      DATABASE_URL: "sqlite::memory:",
+      SMTP_USER: "",
+      SMTP_PASSWORD: "",
+      ...env,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  let output = "";
   child.stdout?.on("data", (chunk: Buffer) => {
     output += chunk.toString();
   });
@@ -42,7 +59,36 @@ async function startServer(port: number): Promise<ChildProcess> {
     if (child.exitCode !== null || Date.now() > deadline) throw new Error(output || "server did not listen");
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  return child;
+  return { child, output: () => output };
+}
+
+async function startServerExpectExit(env: Record<string, string | undefined>): Promise<{ code: number | null; output: string }> {
+  const port = await freePort();
+  let output = "";
+  const child = spawn(process.execPath, ["--experimental-strip-types", "src/browser/server.ts"], {
+    cwd: root,
+    env: { ...process.env, PORT: String(port), ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout?.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  let timedOut = false;
+  // The startup watchdog must use real time to reap a child process if a regression leaves it running.
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+  }, 5_000);
+  try {
+    const [code] = await once(child, "exit");
+    if (timedOut) throw new Error(output || "server did not exit after invalid production config");
+    return { code: code as number | null, output };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 type SecurityHeaders = {
@@ -202,6 +248,46 @@ function sendChunked(port: number, path: string, chunks: string[], cookie: strin
   });
 }
 
+function sendDuringShutdown(
+  port: number,
+  path: string,
+  cookie: string,
+  body: URLSearchParams,
+  beforeFinishingBody: () => Promise<void>,
+): Promise<Reply> {
+  const encodedBody = body.toString();
+  return new Promise<Reply>((resolve, reject) => {
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path,
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": Buffer.byteLength(encodedBody),
+          expect: "100-continue",
+          cookie,
+        },
+      },
+      (response) => readHttpReply(response, resolve),
+    );
+    request.on("continue", () => {
+      const split = Math.floor(encodedBody.length / 2);
+      request.write(encodedBody.slice(0, split));
+      void beforeFinishingBody().then(
+        () => request.end(encodedBody.slice(split)),
+        (error: unknown) => {
+          request.destroy();
+          reject(error);
+        },
+      );
+    });
+    request.on("error", reject);
+    request.flushHeaders();
+  });
+}
+
 function formBody(email: string, size: number): string {
   const prefix = `email=${encodeURIComponent(email)}&pad=`;
   assert.ok(size >= prefix.length);
@@ -215,6 +301,7 @@ type Watch = {
   events: () => number;
   untilOpen: () => Promise<void>;
   untilCount: (count: number) => Promise<void>;
+  untilClosed: () => Promise<void>;
   stop: () => void;
 } & SecurityHeaders;
 
@@ -225,6 +312,10 @@ function watchSession(port: number, invite: string, cookie: string | null): Prom
     signal: controller.signal,
   }).then(async (response) => {
     let text = "";
+    let resolveClosed: () => void = () => {};
+    const closed = new Promise<void>((resolve) => {
+      resolveClosed = resolve;
+    });
     if (response.ok && response.body) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -237,10 +328,13 @@ function watchSession(port: number, invite: string, cookie: string | null): Prom
           }
         } catch {
           // The test closed this stream.
+        } finally {
+          resolveClosed();
         }
       })();
     } else {
       text = await response.text();
+      resolveClosed();
     }
     const events = () => text.split("event: session").length - 1;
     const waitUntil = async (ready: () => boolean, detail: () => string) => {
@@ -257,10 +351,20 @@ function watchSession(port: number, invite: string, cookie: string | null): Prom
       events,
       untilOpen: () => waitUntil(() => text.includes(": open"), () => `stream ${response.status} ${JSON.stringify(text)}`),
       untilCount: (count: number) => waitUntil(() => events() >= count, () => `saw ${events()} session events in ${JSON.stringify(text)}`),
+      untilClosed: () => closed,
       stop: () => controller.abort(),
       ...securityHeadersOf(response),
     };
   });
+}
+
+async function getHealth(port: number): Promise<{ status: number; body: string; type: string }> {
+  const response = await fetch(`http://127.0.0.1:${port}/health`);
+  return {
+    status: response.status,
+    body: await response.text(),
+    type: response.headers.get("content-type") ?? "",
+  };
 }
 
 function squareClass(body: string, index: string): string {
@@ -1523,3 +1627,185 @@ test("the fifty-first distinct sign-in address within an hour returns 429 and le
     await once(fresh, "exit");
   }
 });
+
+test("production startup fails fast when required config is missing", async () => {
+  const failed = await startServerExpectExit({
+    NODE_ENV: "production",
+    DATABASE_URL: "",
+    PUBLIC_URL: "",
+    SMTP_USER: "",
+    SMTP_PASSWORD: "",
+  });
+  assert.notEqual(failed.code, 0);
+  assert.match(failed.output, /Missing required configuration: DATABASE_URL, PUBLIC_URL, SMTP_USER, SMTP_PASSWORD/);
+  assert.doesNotMatch(failed.output, /Co-opword listening/);
+});
+
+test("production startup rejects invalid PUBLIC_URL without printing its value", async () => {
+  const publicUrl = "http://insecure.example/path";
+  const failed = await startServerExpectExit({
+    NODE_ENV: "production",
+    DATABASE_URL: "sqlite:/unused.sqlite",
+    PUBLIC_URL: publicUrl,
+    SMTP_USER: "mailer@example.test",
+    SMTP_PASSWORD: "smtp-password-value",
+  });
+  assert.notEqual(failed.code, 0);
+  assert.match(failed.output, /Invalid configuration: PUBLIC_URL/);
+  assert.equal(failed.output.includes(publicUrl), false);
+  assert.equal(failed.output.includes("smtp-password-value"), false);
+});
+
+test("production startup rejects invalid port and SMTP transport settings", async () => {
+  const invalidValues: [string, string][] = [
+    ["PORT", "65536"],
+    ["SMTP_PORT", "0"],
+    ["SMTP_SECURE", "yes"],
+  ];
+  for (const [name, value] of invalidValues) {
+    const failed = await startServerExpectExit({
+      NODE_ENV: "production",
+      DATABASE_URL: "sqlite:/unused.sqlite",
+      PUBLIC_URL: "https://coopword.example.test",
+      SMTP_USER: "mailer@example.test",
+      SMTP_PASSWORD: "smtp-password-value",
+      [name]: value,
+    });
+    assert.notEqual(failed.code, 0);
+    assert.ok(failed.output.includes(`Invalid configuration: ${name}`));
+    assert.equal(failed.output.includes(value), false);
+  }
+});
+
+test("production startup rejects in-memory SQLite", async () => {
+  const secret = "smtp-memory-secret";
+  const failed = await startServerExpectExit({
+    NODE_ENV: "production",
+    DATABASE_URL: "sqlite::memory:",
+    PUBLIC_URL: "https://coopword.example.test",
+    SMTP_USER: "mailer@example.test",
+    SMTP_PASSWORD: secret,
+  });
+  assert.notEqual(failed.code, 0);
+  assert.match(failed.output, /Invalid configuration: DATABASE_URL/);
+  assert.equal(failed.output.includes(secret), false);
+});
+
+test("production startup succeeds with required config and does not contact SMTP", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "coopword-production-"));
+  const dbPath = join(dir, "coopword.sqlite").replaceAll("\\", "/");
+  const port = await freePort();
+  const started = await startServerProcess(port, {
+    NODE_ENV: "production",
+    DATABASE_URL: `sqlite:${dbPath}`,
+    PUBLIC_URL: "https://coopword.example.test",
+    SMTP_USER: "mailer@example.test",
+    SMTP_PASSWORD: "smtp-password-value",
+    SMTP_HOST: "127.0.0.1",
+    SMTP_PORT: "1",
+    SMTP_SECURE: "false",
+  });
+  try {
+    assert.match(started.output(), /Co-opword listening/);
+    assert.equal(started.output().includes("smtp-password-value"), false);
+    const health = await getHealth(port);
+    assert.equal(health.status, 200);
+    assert.equal(health.body, "healthy");
+  } finally {
+    started.child.kill();
+    await once(started.child, "exit");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("GET /health reports healthy or unhealthy status without diagnostics", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "coopword-health-"));
+  const dbPath = join(dir, "coopword.sqlite").replaceAll("\\", "/");
+  const port = await freePort();
+  const child = await startServer(port, { DATABASE_URL: `sqlite:${dbPath}` });
+  try {
+    const healthy = await getHealth(port);
+    assert.equal(healthy.status, 200);
+    assert.equal(healthy.body, "healthy");
+    assert.match(healthy.type, /text\/plain/);
+    assert.equal(healthy.body.includes(dbPath), false);
+    assert.equal(healthy.body.toLowerCase().includes("sqlite"), false);
+    assert.equal(healthy.body.includes(dir), false);
+
+    const db = new DatabaseSync(dbPath);
+    db.exec("DROP TABLE snapshot_store");
+    db.close();
+
+    const unhealthy = await getHealth(port);
+    assert.equal(unhealthy.status, 503);
+    assert.equal(unhealthy.body, "unhealthy");
+    assert.match(unhealthy.type, /text\/plain/);
+    assert.equal(unhealthy.body.includes(dbPath), false);
+    assert.equal(unhealthy.body.toLowerCase().includes("sqlite"), false);
+    assert.equal(unhealthy.body.includes("Error"), false);
+    assert.equal(unhealthy.body.includes(dir), false);
+  } finally {
+    child.kill();
+    await once(child, "exit");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test(
+  "SIGTERM drains an in-flight write, closes SSE, and exits within 30 seconds",
+  { skip: process.platform === "win32" ? "Windows does not deliver SIGTERM to child process handlers" : false },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "coopword-shutdown-"));
+    const dbPath = join(dir, "coopword.sqlite").replaceAll("\\", "/");
+    const port = await freePort();
+    const started = await startServerProcess(port, { DATABASE_URL: `sqlite:${dbPath}` });
+    const child = started.child;
+    const exited = once(child, "exit");
+    const began = Date.now();
+    try {
+      const cookie = await signIn(port, "shutdown");
+      const startedSession = await send(port, "POST", "/session", cookie, { title: "First Row" });
+      const invite = new URL(startedSession.location ?? "", "http://localhost").searchParams.get("invite") ?? "";
+      assert.ok(invite);
+      await send(port, "POST", "/session/select", cookie, { invite, index: "0" });
+      const stream = await watchSession(port, invite, cookie);
+      await stream.untilOpen();
+
+      const write = sendDuringShutdown(
+        port,
+        "/session/letter",
+        cookie,
+        new URLSearchParams({ invite, index: "0", letter: "A" }),
+        async () => {
+          const shutdownLog = once(child.stdout!, "data").then(([chunk]) => chunk);
+          const exitedEarly = exited.then(() => {
+            throw new Error("server exited before beginning shutdown");
+          });
+          assert.equal(child.kill("SIGTERM"), true);
+          const chunk = await Promise.race([shutdownLog, exitedEarly]);
+          assert.match(chunk.toString(), /Received SIGTERM, shutting down/);
+        },
+      );
+      const written = await write;
+      assert.equal(written.status, 303);
+      await stream.untilClosed();
+
+      const [code] = await exited;
+      assert.equal(code, 0);
+      assert.ok(Date.now() - began < 30_000);
+      assert.match(started.output(), /Shutdown complete/);
+
+      const db = new DatabaseSync(dbPath);
+      const row = db.prepare("SELECT snapshot FROM snapshot_store WHERE id = 1").get() as { snapshot: string } | undefined;
+      db.close();
+      assert.match(row?.snapshot ?? "", /"letters":\["A"/);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill();
+        await exited;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+

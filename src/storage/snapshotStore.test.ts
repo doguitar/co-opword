@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { openSnapshotStore } from "./snapshotStore.ts";
 
@@ -43,4 +44,18 @@ test("an unknown database scheme fails before a read or a write and creates no s
   const dir = dataDirectory();
   await assert.rejects(openSnapshotStore("redis://localhost/1", dir));
   assert.deepEqual(readdirSync(dir), []);
+});
+
+test("check works with an empty store and fails when the table is missing", async () => {
+  const dir = dataDirectory();
+  const path = join(dir, "probe.sqlite");
+  const store = await openSnapshotStore(`sqlite:${path}`, dir);
+  await store.check();
+  await store.write("snapshot");
+  await store.check();
+
+  const db = new DatabaseSync(path);
+  db.exec("DROP TABLE snapshot_store");
+  db.close();
+  await assert.rejects(() => store.check());
 });

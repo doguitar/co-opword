@@ -29,6 +29,8 @@ Without SMTP credentials outside production, sign-in, session-invite, and Revise
 
 The server also loads `data/.env` on startup when the file exists; inherited environment variables take precedence. For local deployments, put these settings in that ignored file. Keep it private and do not commit it.
 
+Outside production, empty SMTP credentials keep writing usable links to the outbox files above. In production, startup fails fast unless `NODE_ENV=production`, a file-backed SQLite `DATABASE_URL` (in-memory SQLite is rejected), HTTPS `PUBLIC_URL`, `SMTP_USER`, and `SMTP_PASSWORD` are set; SMTP host/port/TLS and `MAIL_FROM` may rely on defaults. Loopback `GET /health` returns only `healthy` or `unhealthy` for process checks.
+
 ## Browser screenshots
 
 The PNGs in `regression/` are the baseline captured through the omp browser relay.

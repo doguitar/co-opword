@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deliverLink } from "../mail/magicLink.ts";
+import { validateProductionConfig } from "../productionConfig.ts";
 import { CrosswordRejected, DisplayNameTaken, MagicLinkRateLimited, openCoOpword, type PlayerSession } from "../product/coopword.ts";
 import { openSnapshotStore } from "../storage/snapshotStore.ts";
 import { librarySeed } from "./librarySeed.ts";
@@ -14,6 +15,9 @@ try {
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 }
+
+validateProductionConfig();
+
 const port = Number(process.env.PORT ?? 3000);
 const pagesDir = join(here, "pages");
 const outboxPath = join(dataDir, "magic-link-outbox.jsonl");
@@ -592,6 +596,12 @@ const streams = new Set<SessionStream>();
 const grace = new Map<string, ReturnType<typeof setTimeout>>();
 // A Session form POST drops this page's stream before the redirected page opens the next one.
 const reconnectGraceMs = 1500;
+const shutdownDeadlineMs = 30_000;
+let shuttingDown = false;
+
+function isLoopback(address: string | undefined): boolean {
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
 
 function streamKey(token: string, invite: string): string {
   return `${token}\0${invite}`;
@@ -640,6 +650,8 @@ function dropStream(stream: SessionStream): void {
 }
 
 const server = createServer(async (request, response) => {
+  const acceptedBeforeShutdown = !shuttingDown;
+
   const contentLength = Number(request.headers["content-length"]);
   if (Number.isFinite(contentLength) && contentLength > maxBodyBytes) {
     rejectTooLarge(request, response);
@@ -656,8 +668,35 @@ const server = createServer(async (request, response) => {
     }
     throw error;
   }
-
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+
+  if (request.method === "GET" && url.pathname === "/health") {
+    if (!isLoopback(request.socket?.remoteAddress)) {
+      send(response, 404, message("Not found."));
+      return;
+    }
+    if (shuttingDown) {
+      response.writeHead(503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", connection: "close" });
+      response.end("unhealthy");
+      return;
+    }
+    try {
+      await store.check();
+      response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      response.end("healthy");
+    } catch {
+      response.writeHead(503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      response.end("unhealthy");
+    }
+    return;
+  }
+
+  if (!acceptedBeforeShutdown) {
+    response.writeHead(503, { connection: "close" });
+    response.end();
+    return;
+  }
+
   coOpword.noteTime(Date.now());
 
   if (request.method === "GET" && url.pathname === "/co-opword.css") {
@@ -1310,6 +1349,40 @@ const server = createServer(async (request, response) => {
 
   send(response, 404, message("Not found."));
 });
+
+function shutDown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal}, shutting down`);
+  const openStreams = [...streams];
+  streams.clear();
+  for (const pending of grace.values()) clearTimeout(pending);
+  grace.clear();
+  for (const stream of openStreams) {
+    try {
+      stream.response.end();
+    } catch {
+      // Stream may already be closed.
+    }
+  }
+  const force = setTimeout(() => {
+    console.error("Shutdown timed out after 30 seconds");
+    server.closeAllConnections();
+    process.exit(1);
+  }, shutdownDeadlineMs);
+  server.close((error) => {
+    clearTimeout(force);
+    if (error) {
+      console.error("Error during shutdown");
+      process.exit(1);
+      return;
+    }
+    console.log("Shutdown complete");
+    process.exit(0);
+  });
+}
+
+process.on("SIGTERM", () => shutDown("SIGTERM"));
 
 server.listen(port, () => {
   console.log(`Co-opword listening on http://localhost:${port}`);

@@ -49,6 +49,23 @@ test("production requires SMTP credentials instead of writing links to a local o
   });
 });
 
+test("configured SMTP rejects credentials in PUBLIC_URL", async () => {
+  await withEnvironment({
+    NODE_ENV: "production",
+    SMTP_USER: "mailer@example.test",
+    SMTP_PASSWORD: "smtp-password",
+    SMTP_HOST: "127.0.0.1",
+    SMTP_PORT: "1",
+    SMTP_SECURE: "false",
+    PUBLIC_URL: "https://user:password@coopword.example.test",
+  }, async () => {
+    await assert.rejects(
+      deliverLink("unused.jsonl", "player@example.test", "token", "/magic"),
+      /PUBLIC_URL must be an HTTPS origin/,
+    );
+  });
+});
+
 test("configured SMTP sends a styled email with an absolute link", async () => {
   const received: string[] = [];
   const server = createServer((socket) => {
